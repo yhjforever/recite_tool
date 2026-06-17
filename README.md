@@ -63,3 +63,6 @@ chmod +x *.command
 
 生成内容依赖 DeepSeek API。请使用自己的 API Key，并自行核对生成稿中的补充内容和联网核对来源。
 
+## 维护
+
+维护、分享、发版和安全检查流程见 [MAINTENANCE.md](MAINTENANCE.md)。
