@@ -1,0 +1,31 @@
+# secrets and local settings
+.env
+config.yaml
+gui_state.json
+
+# Python caches
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*$py.class
+
+# virtual environments
+.venv/
+venv/
+env/
+
+# build artifacts
+build/
+dist/
+*.spec
+
+# runtime outputs
+_recite/
+output/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# release bundles are uploaded as GitHub Release assets, not committed
+release-assets/

@@ -1,0 +1,16 @@
+.env
+config.yaml
+gui_state.json
+__pycache__/
+*.pyc
+# Python 虚拟环境（安装-Mac.command 生成）
+.venv/
+# macOS 杂项
+.DS_Store
+# PyInstaller 打包产物
+build/
+dist/
+*.spec
+# 运行产物默认落在 source_dir 下，不在本仓库；如放入仓库可解开下面两行
+# _recite/
+# output/

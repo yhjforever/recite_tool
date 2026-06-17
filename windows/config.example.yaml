@@ -1,0 +1,51 @@
+# ============ recite_tool 配置 ============
+# 复制为 config.yaml 后按需修改。API Key 建议放在 .env 里（优先级高于此处）。
+
+# ---- DeepSeek API ----
+api_key: ""                               # 留空则读环境变量 / .env 中的 DEEPSEEK_API_KEY
+base_url: "https://api.deepseek.com"
+model: "deepseek-chat"                     # 忠实整理用 deepseek-chat；不建议 reasoner（爱改写）
+temperature: 0.3                           # 越低越忠实原文
+max_tokens: 8192                           # 单次输出上限，拉满减少截断
+audit_temperature: 0.2
+request_timeout: 300                       # 秒
+max_retries: 5                             # 网络/限流重试
+max_continuations: 8                       # 单章因长度被截断时自动“继续”的最多轮数
+retry_backoff: 3                           # 重试退避基数（秒）
+
+# ---- 路径 ----
+source_dir: "E:/codex_project/预防整理"     # 母文件夹：放所有 PPT/电子课本 + 一份大纲
+outline_file: ""                           # 留空=自动识别(文件名含“大纲/教学大纲/syllabus”)；否则填精确文件名
+output_dir: ""                             # 留空=<source_dir>/output（最终 .md 背诵稿）
+work_dir: ""                               # 留空=<source_dir>/_recite（缓存/提示词包/审计结果）
+
+# ---- 学科（留空=审计时自动判断）----
+subject: ""
+
+# ---- 审计时忽略的文件（glob，大小写不敏感）----
+ignore:
+  - "*成绩*"
+  - "*学习要求*"
+  - "*模拟题*"
+  - "*评分*"
+  - "*提示词*"        # 非课程素材示例；按需增删
+
+# ---- 联网核对（web 检索 → 真实来源补充）----
+# 中国大陆可直连、免 Key：bing_cn（默认，抓 cn.bing.com）/ pubmed（学术医学）/ ddg(需装ddgs,国内不稳)
+# 需 Key（可能需自备网络）：tavily / serper / bing(Azure)；Key 放 .env: TAVILY_API_KEY / SERPER_API_KEY / BING_API_KEY
+search_provider: "bing_cn"
+search_fallback: "pubmed"     # 主源无结果时自动回退（国内直连免Key）；留空可关闭
+search_api_key: ""
+search_max_results: 5
+search_fetch_pages: true      # 对前几条结果抓取网页正文以提升可靠性
+verify_max_items: 8           # 每章最多核对的待核点数（控时间与成本）
+fetch_timeout: 20
+book_slice_max_chars: 40000   # 整本电子课本切到单章的字数上限（细节高可调大，但勿超模型上下文）
+trusted_domains:              # 可信来源优先（命中则排前，并标“可信源”）；按学科增删
+  - pubmed.ncbi.nlm.nih.gov
+  - ncbi.nlm.nih.gov
+  - who.int
+  - nhc.gov.cn
+  - chinacdc.cn
+  - msdmanuals.cn
+  - cdc.gov
