@@ -72,7 +72,7 @@ def _read_pptx(path: Path) -> str:
 
 
 def _read_plain(path: Path) -> str:
-    """按常见中文编码依次尝试：utf-8-sig → gb18030 → utf-16。
+    """按 Windows 常见编码依次尝试：utf-8-sig → gb18030 → utf-16 → cp936。
     不用 errors='ignore' 静默吞字；都失败才宽松解码并校验乱码比例。"""
     raw = path.read_bytes()
     for enc in ("utf-8-sig", "gb18030", "utf-16"):

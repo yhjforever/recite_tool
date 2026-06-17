@@ -15,7 +15,7 @@ if getattr(sys, "frozen", False):
     # 因此把配置落到 .app 同级目录（用户可见、可写）。
     _exe = Path(sys.executable).resolve()
     if _exe.parent.name == "MacOS" and _exe.parents[1].name == "Contents":
-        ROOT = _exe.parents[3]            # MacOS → Contents → *.app → 容器目录
+        ROOT = _exe.parents[3]            # MacOS -> Contents -> *.app -> 容器目录
     else:
         ROOT = _exe.parent
 else:

@@ -34,7 +34,7 @@ def _user_prompt(cfg, ch, all_chapters, sources) -> str:
                           requirements=getattr(cfg, "subject_note", ""))
 
 
-def run_generate(cfg, only: str = "", force: bool = False) -> None:
+def run_generate(cfg, only: str = "", force: bool = False, progress_cb=None) -> None:
     cfg.require_api_key()
     cfg.ensure_dirs()
     if not cfg.audit_path.exists():
@@ -60,17 +60,19 @@ def run_generate(cfg, only: str = "", force: bool = False) -> None:
         stem = chapter_stem(idx, title)
         out_path = cfg.output_dir / f"{stem}.md"
         partial_path = cfg.output_dir / f"{stem}.partial.md"
+        if progress_cb:
+            progress_cb(i, total, title)
 
         if out_path.exists() and not force:
             print(f"[{i}/{total}] 跳过（已存在）: {stem}.md")
             continue
 
-        print(f"[{i}/{total}] 生成: {title} …")
+        print(f"[{i}/{total}] 正在生成：{title} …")
         user = _user_prompt(cfg, ch, all_chapters, sources)
 
         def on_progress(rnd, finish, usage):
-            tag = "完成" if finish != "length" else "续写"
-            print(f"        · 第{rnd}段 {tag}  out_tokens={usage.get('completion_tokens', 0)}")
+            if finish == "length":           # 仅在需要续写时提示，减少噪音
+                print(f"        · 内容较长，自动续写中（第 {rnd} 段）…")
 
         t0 = time.time()
         res = ds.chat_long(system, user,

@@ -18,8 +18,8 @@ TOP = "recite_tool_mac"                       # 解压后顶层文件夹名
 OUT = SRC.parent / "recite_tool_mac.zip"
 
 # 不打进分发包的内容：缓存、虚拟环境、打包产物、隐私文件、本脚本自身
-EXCLUDE_DIRS = {"__pycache__", ".venv", "build", "dist", ".git", ".idea"}
-EXCLUDE_FILES = {".env", "gui_state.json", ".DS_Store", Path(__file__).name}
+EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", ".venv", "build", "dist", ".git", ".idea"}
+EXCLUDE_FILES = {".env", "config.yaml", "gui_state.json", ".DS_Store", Path(__file__).name}
 
 
 def unix_mode(path: Path) -> int:

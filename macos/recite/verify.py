@@ -65,7 +65,7 @@ def _strip_old_section(md: str) -> str:
     return md[:idx].rstrip() + "\n" if idx >= 0 else md.rstrip() + "\n"
 
 
-def run_verify(cfg, only: str = "", force: bool = False) -> None:
+def run_verify(cfg, only: str = "", force: bool = False, progress_cb=None) -> None:
     cfg.require_api_key()
     cfg.require_search_key()
     cfg.ensure_dirs()
@@ -77,8 +77,11 @@ def run_verify(cfg, only: str = "", force: bool = False) -> None:
     chapters = _select(audit["chapters"], only)
     ds = DeepSeek(cfg)
 
-    print(f"[核对] provider={cfg.search_provider}  学科={subject}  待处理 {len(chapters)} 章")
-    for ch in chapters:
+    total = len(chapters)
+    print(f"[核对] provider={cfg.search_provider}  学科={subject}  待处理 {total} 章")
+    for i, ch in enumerate(chapters, 1):
+        if progress_cb:
+            progress_cb(i, total, ch.get("title", ""))
         stem = chapter_stem(ch.get("index"), ch.get("title", ""))
         md_path = cfg.output_dir / f"{stem}.md"
         if not md_path.exists():
