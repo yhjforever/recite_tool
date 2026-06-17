@@ -84,9 +84,10 @@ output/
 
 ## 4. 每次发布前必须检查
 
-在 `E:\codex_project\recite_tool_github_publish` 里运行：
+在发布仓库目录里运行，例如：
 
 ```powershell
+cd C:\path\to\recite_tool_github_publish
 git status --short --ignored
 rg -n --hidden --no-ignore-vcs "DEEPSEEK_API_KEY\s*=\s*sk-|TAVILY_API_KEY\s*=|SERPER_API_KEY\s*=|BING_API_KEY\s*=" .
 ```
@@ -115,14 +116,14 @@ config.yaml: api_key: sk-真实内容
 不要直接在 GitHub 网页乱改。建议流程：
 
 1. 在原始工作目录修：
-   - Windows：`E:\codex_project\recite_tool`
-   - macOS：`E:\codex_project\recite_tool_mac`
+   - Windows：`C:\path\to\recite_tool`
+   - macOS：`C:\path\to\recite_tool_mac` 或 macOS 上的对应目录
 2. 跑测试：
    ```powershell
-   cd E:\codex_project\recite_tool
+   cd C:\path\to\recite_tool
    python -B -m pytest -q
 
-   cd E:\codex_project\recite_tool_mac
+   cd C:\path\to\recite_tool_mac
    python -B -m pytest -q
    ```
 3. 把安全文件同步到发布仓库：
@@ -192,4 +193,3 @@ config.yaml: api_key: sk-真实内容
 ## 9. 给未来维护者的一句话
 
 这个工具的核心价值不是代码炫技，而是让医学生在期末复习时少一点崩溃：资料能被整理成可背、可核对、可追溯的稿子。维护时先保护这个核心，再谈美化和扩展。
-
