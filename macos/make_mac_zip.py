@@ -15,7 +15,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
 TOP = "recite_tool_mac"                       # 解压后顶层文件夹名
-OUT = SRC.parent / "recite_tool_mac.zip"
+OUT = SRC.parent / "recite_tool_macos.zip"
 
 # 不打进分发包的内容：缓存、虚拟环境、打包产物、隐私文件、本脚本自身
 EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", ".venv", "build", "dist", ".git", ".idea"}
@@ -59,7 +59,7 @@ def main():
                 mode = (info.external_attr >> 16) & 0o777
                 ok = "✓" if (mode & 0o100) else "✗"
                 print(f"     {ok} {info.filename}  mode={oct(mode)} host={'Unix' if info.create_system == 3 else info.create_system}")
-    print("\n把 recite_tool_mac.zip 拷到 Mac → 双击解压 → 双击「启动.command」即可。")
+    print(f"\n把 {OUT.name} 拷到 Mac → 双击解压 → 双击「启动.command」即可。")
 
 
 if __name__ == "__main__":
