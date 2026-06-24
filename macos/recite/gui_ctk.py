@@ -1,10 +1,10 @@
 """CustomTkinter 版图形界面（圆角卡片 + 现代列表 + 深色终端日志）。
 后端逻辑与 ttk 版一致；CustomTkinter 缺失时由 gui.launch() 回退到 ttk 版。"""
 import os
+import sys
 import queue
 import threading
 import subprocess
-import sys
 from pathlib import Path
 
 import tkinter as tk
@@ -22,20 +22,31 @@ from .util import read_json, chapter_stem
 from .gui import (read_env_key, write_env_kv, write_env_key, load_state, save_state,
                   _QueueWriter, SEARCH_ENV, ENV_PATH)
 
-# ---- 调色板（浅色现代）----
-CANVAS = "#EEF1F6"
-CARD = "#FFFFFF"
-TEXT = "#1F2937"
-SUB = "#7B8694"
-ACCENT = "#2F6FED"
-ACCENT_H = "#2257C8"
-OKC = "#16A34A"
-WARNC = "#E08613"
-ERRC = "#E5484D"
-BORDER = "#DCE0E6"
-ZEBRA = "#F6F8FB"
-HOVER = "#EAF1FF"
-SEL = "#DBE8FF"
+# ---- 设计令牌：温润“书房伴侣”（纸感暖底 + 古典低饱和强调色）----
+# 取自 ui-ux-pro-max → E-Ink/Paper（纸感、阅读优先、衬线）+ Nature Distilled（暖陶土/米白）
+# + Notes/Writing（暖墨色 + 强调色落在米色上）。原则：温润纸感、弱边框重留白、
+# 衬线标题、单一古典强调色（深松石绿），状态用古典色（暗瓦红/苔绿/赭石）。
+CANVAS = "#FAF6EF"        # 主画布：温润纸色（暖米白，模拟纸张、降反光）
+CARD = "#FFFDF9"          # 卡片：暖象牙白（比纸面略亮，靠留白与微差区分，不靠硬边框）
+SURFACE_SOFT = "#F3ECE0"  # 输入框 / 内嵌区：更暖的纸面
+INK = "#33302A"           # 标题（暖近黑、褐调）—— 衬线
+TEXT = "#4A443B"          # 正文（暖深灰褐）
+SUB = "#8C8273"           # 次要文字（暖灰褐 taupe）
+ACCENT = "#2F6B5E"        # 主操作：深松石绿（低饱和、古典装帧感）
+ACCENT_H = "#25564B"      # 主操作 hover
+OKC = "#4B7A5B"           # 成功 / 已完成：苔绿（不刺眼）
+WARNC = "#A9762F"         # 警告 / 截断：赭石
+ERRC = "#9C4A3C"          # 错误 / 未设置：暗瓦红（古典）
+BORDER = "#E7DECF"        # 极弱暖描边（很少用，避免“框套框”）
+LINE = "#EADFCD"          # 分隔线（比 border 更弱）
+ZEBRA = "#FBF7EF"         # 斑马行（暖）
+HOVER = "#F2EADC"         # 行 hover（暖）
+SEL = "#E3EEE7"           # 选中行：极浅松石绿
+HEADBG = "#F1E9DA"        # 表头底（暖）
+HERO = "#33302A"          # 兼容旧引用（不再用于横幅）
+HERO_SUB = "#8C8273"
+CHIP_OK = "#FFFDF9"       # 状态改用色点 + 文字，不再用色块
+CHIP_ERR = "#FFFDF9"
 
 
 class App:
@@ -55,22 +66,31 @@ class App:
         self.root.title("背诵稿生成器 · recite_tool")
         self.root.configure(fg_color=CANVAS)
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        W, H = min(1180, max(1000, sw - 160)), min(900, max(660, sh - 90))
+        W, H = min(1200, max(1000, sw - 150)), min(920, max(680, sh - 90))
         self.root.geometry(f"{W}x{H}")
-        self.root.minsize(1000, 660)
+        self.root.minsize(1000, 680)
         try:
             ico = ROOT / "icon.ico"
             if ico.exists():
                 self.root.iconbitmap(str(ico))
         except Exception:
             pass
+        self._style_titlebar()                       # 标题栏染成纸色，消除冷暖割裂
+        self.root.after(60, self._style_titlebar)    # 窗口完全实现后再染一次，确保生效
 
         self.f = ctk.CTkFont("Microsoft YaHei UI", 12)
         self.fb = ctk.CTkFont("Microsoft YaHei UI", 12, "bold")
         self.f_sm = ctk.CTkFont("Microsoft YaHei UI", 11)
         self.f_h1 = ctk.CTkFont("Microsoft YaHei UI", 19, "bold")
-        self.f_sec = ctk.CTkFont("Microsoft YaHei UI", 14, "bold")
+        self.f_sec = ctk.CTkFont("Microsoft YaHei UI", 13, "bold")
         self.f_mono = ctk.CTkFont("Consolas", 11)
+        # 衬线（书卷气）：标题与阅读区用宋体，正文/控件保持无衬线以保证屏幕清晰度。
+        self.serif_name = self._pick_serif()
+        self.f_serif_h1 = ctk.CTkFont(self.serif_name, 24, "bold")
+        self.f_serif_sec = ctk.CTkFont(self.serif_name, 16, "bold")
+        self.f_read = ctk.CTkFont(self.serif_name, 13)
+        self.f_read_b = ctk.CTkFont(self.serif_name, 13, "bold")
+        self._collapse = {}
 
         self.var_source = tk.StringVar()
         self.var_subject = tk.StringVar()
@@ -87,151 +107,294 @@ class App:
         self._refresh_chapters()
         self._update_search_status()
         self._update_actions()
+        # 已配置过资料目录则收起“资料与设置”，第一眼留给内容（章节 + 详情预览）。
+        if self.var_source.get().strip():
+            self._set_collapse("settings", False, animate=False)
+        # 从任务栏还原时补染标题栏，避免标题栏闪回系统冷色（最小化/还原本身由 DWM 动画驱动）。
+        self.root.bind("<Map>", lambda e: self.root.after(1, self._style_titlebar))
         self.root.after(120, self._poll)
 
     # ---------- 小部件助手 ----------
+    def _pick_serif(self):
+        """挑一款本机可用的中文衬线（书卷气）；缺失则回退到宋体。"""
+        import tkinter.font as tkfont
+        try:
+            fams = set(tkfont.families())
+        except Exception:
+            return "宋体"
+        for name in ["Noto Serif SC", "Source Han Serif SC", "思源宋体", "华文中宋",
+                     "STZhongsong", "仿宋", "FangSong", "新宋体", "宋体", "SimSun"]:
+            if name in fams:
+                return name
+        return "宋体"
+
+    def _style_titlebar(self):
+        """Windows 11：把原生标题栏染成纸色、文字染成墨色，与暖色正文连成一片。
+        旧系统 / 非 Windows 上 DWM 调用会失败，静默跳过（标题栏保持系统默认）。"""
+        try:
+            import ctypes
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+
+            def _ref(h):  # "#RRGGBB" -> COLORREF(0x00BBGGRR)
+                r, g, b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
+                return ctypes.c_int((b << 16) | (g << 8) | r)
+
+            dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+            for attr, col in ((35, _ref(CANVAS)), (36, _ref(INK))):  # 35=CAPTION_COLOR, 36=TEXT_COLOR
+                dwm(hwnd, attr, ctypes.byref(col), ctypes.sizeof(col))
+        except Exception:
+            pass
+
     def _primary(self, parent, text, cmd, width=140):
-        b = ctk.CTkButton(parent, text=text, command=cmd, width=width, height=30,
-                          corner_radius=8, fg_color=ACCENT, hover_color=ACCENT_H,
-                          font=self.fb, text_color="#FFFFFF")
+        # 主操作：深松石绿实底，柔和大圆角；像盖在纸上的印章。
+        b = ctk.CTkButton(parent, text=text, command=cmd, width=width, height=34,
+                          corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_H,
+                          font=self.fb, text_color="#FBF8F2")
         self._buttons.append(b)
         return b
 
     def _ghost(self, parent, text, cmd, width=96):
-        b = ctk.CTkButton(parent, text=text, command=cmd, width=width, height=30,
-                          corner_radius=8, fg_color=CARD, hover_color="#EEF2F8",
-                          text_color="#3A4654", border_width=1, border_color=BORDER, font=self.f)
+        # 次操作：暖纸面、无硬边框，hover 微暖；去“工业感”。
+        b = ctk.CTkButton(parent, text=text, command=cmd, width=width, height=34,
+                          corner_radius=10, fg_color=SURFACE_SOFT, hover_color=HOVER,
+                          text_color=TEXT, border_width=0, font=self.f)
         self._buttons.append(b)
         return b
 
     def _card(self, parent, **kw):
-        return ctk.CTkFrame(parent, fg_color=CARD, corner_radius=14, border_width=1,
-                            border_color=BORDER, **kw)
+        # 卡片：暖象牙白、大圆角、极弱暖描边（近无），靠留白区分层级而非硬框。
+        color = kw.pop("fg_color", CARD)
+        border = kw.pop("border_color", LINE)
+        bw = kw.pop("border_width", 1)
+        return ctk.CTkFrame(parent, fg_color=color, corner_radius=16, border_width=bw,
+                            border_color=border, **kw)
+
+    def _section(self, parent, title, hint=""):
+        """衬线分区标题 + 简短说明（无编号、无营销副标）。"""
+        head = ctk.CTkFrame(parent, fg_color="transparent")
+        head.pack(fill="x", padx=22, pady=(14, 4))
+        ctk.CTkLabel(head, text=title, font=self.f_serif_sec, text_color=INK).pack(side="left")
+        if hint:
+            ctk.CTkLabel(head, text=hint, font=self.f_sm, text_color=SUB).pack(
+                side="left", padx=12)
+        return head
+
+    def _collapsible(self, parent, key, title, hint="", start_open=True):
+        """可折叠卡片：点表头即时收起/展开。
+        说明：曾试过逐帧高度缓动，但 CTkScrollableFrame 在反复 reflow 下会留残影/空白
+        （Tk 重绘模型限制），故采用即时切换 + 一次干净重绘，确保不出现幽灵残像。"""
+        card = self._card(parent)
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.pack(fill="x", padx=22, pady=(13, 3))
+        caret = ctk.CTkLabel(hdr, text="", font=self.f_sm, text_color=SUB, width=16)
+        caret.pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(hdr, text=title, font=self.f_serif_sec, text_color=INK).pack(side="left")
+        if hint:
+            ctk.CTkLabel(hdr, text=hint, font=self.f_sm, text_color=SUB).pack(side="left", padx=12)
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        self._collapse[key] = {"caret": caret, "body": body, "open": None}
+        for w in (hdr, caret):
+            w.bind("<Button-1>", lambda e, k=key: self._toggle_collapse(k))
+            try:
+                w.configure(cursor="hand2")
+            except Exception:
+                pass
+        self._set_collapse(key, start_open)
+        return card, body
+
+    def _set_collapse(self, key, open_, animate=False):
+        c = self._collapse.get(key)
+        if not c or c["open"] == open_:
+            return
+        c["open"] = open_
+        c["caret"].configure(text="▾" if open_ else "▸")
+        if open_:
+            c["body"].pack(fill="x", pady=(0, 8))
+        else:
+            c["body"].pack_forget()
+        self._clean_redraw()                     # 切换后强制一次干净重绘，消除 reflow 残影
+
+    def _clean_redraw(self):
+        """折叠/展开使下方滚动表 reflow，强制重算并清屏，避免 Tk 留下幽灵像素。"""
+        try:
+            self.root.update_idletasks()
+            self.rows.update_idletasks()         # 让滚动表重算 scrollregion 并重绘
+        except Exception:
+            pass
+
+    def _toggle_collapse(self, key):
+        c = self._collapse.get(key)
+        if c:
+            self._set_collapse(key, not c["open"])
 
     # ---------- 布局 ----------
     def _build_ui(self):
         root = self.root
-        head = ctk.CTkFrame(root, fg_color=CANVAS)
-        head.pack(fill="x", padx=22, pady=(10, 1))
-        ctk.CTkLabel(head, text="背诵稿生成器", font=self.f_h1, text_color="#111827").pack(side="left")
-        ctk.CTkLabel(head, text="  按大纲把课件 / 课本整理成可背诵的 Markdown",
-                     font=self.f_sm, text_color=SUB).pack(side="left", pady=(10, 0))
-
-        strip = ctk.CTkFrame(root, fg_color=CANVAS)
-        strip.pack(fill="x", padx=22, pady=(0, 6))
-        ctk.CTkLabel(strip, text="Key", font=self.f_sm, text_color=SUB).pack(side="left")
-        self.lbl_keystat = ctk.CTkLabel(strip, text="未设置 ✗", font=self.fb, text_color=ERRC)
-        self.lbl_keystat.pack(side="left", padx=(6, 18))
-        self.lbl_search = ctk.CTkLabel(strip, text="", font=self.f_sm, text_color=SUB)
-        self.lbl_search.pack(side="left")
-        self.lbl_status = ctk.CTkLabel(strip, text="就绪", font=self.f_sm, text_color=SUB)
+        # 顶部：衬线标题 + 右侧状态；无横幅、无标语、无硬分割线，靠留白分隔。
+        header = ctk.CTkFrame(root, fg_color=CANVAS)
+        header.pack(fill="x", padx=30, pady=(20, 8))
+        ctk.CTkLabel(header, text="背诵稿生成器", font=self.f_serif_h1,
+                     text_color=INK).pack(side="left")
+        state = ctk.CTkFrame(header, fg_color="transparent")
+        state.pack(side="right")
+        # 状态用“色点 + 文字”，古典低饱和色，不用色块药丸。
+        self.lbl_keystat = ctk.CTkLabel(state, text="● API Key 未设置", font=self.fb,
+                                        text_color=ERRC, fg_color="transparent")
+        self.lbl_keystat.pack(side="right", padx=(18, 0))
+        self.lbl_search = ctk.CTkLabel(state, text="", font=self.f_sm, text_color=SUB)
+        self.lbl_search.pack(side="right", padx=(18, 0))
+        self.lbl_status = ctk.CTkLabel(state, text="准备就绪", font=self.f_sm, text_color=SUB)
         self.lbl_status.pack(side="right")
 
-        # ---- 卡片1：资料与设置 ----
-        c1 = self._card(root)
-        c1.pack(fill="x", padx=22, pady=5)
-        ctk.CTkLabel(c1, text="资料与设置", font=self.f_sec, text_color="#111827").pack(
-            anchor="w", padx=16, pady=(8, 2))
-        r1 = ctk.CTkFrame(c1, fg_color=CARD); r1.pack(fill="x", padx=16, pady=4)
-        ctk.CTkLabel(r1, text="资料文件夹", font=self.f, text_color=TEXT, width=80, anchor="w").pack(side="left")
-        self.ent_src = ctk.CTkEntry(r1, textvariable=self.var_source, height=30, corner_radius=8,
-                                    border_color=BORDER, font=self.f, state="readonly")
-        self.ent_src.pack(side="left", fill="x", expand=True, padx=8)
-        self.btn_choose = self._ghost(r1, "选择…", self._choose_source, 84); self.btn_choose.pack(side="left")
-        self._ghost(r1, "设置 / 修改密钥", self._ask_key, 130).pack(side="left", padx=(8, 0))
+        content = ctk.CTkFrame(root, fg_color=CANVAS)
 
-        r2 = ctk.CTkFrame(c1, fg_color=CARD); r2.pack(fill="x", padx=16, pady=4)
-        ctk.CTkLabel(r2, text="学科名称", font=self.f, text_color=TEXT, width=80, anchor="w").pack(side="left")
-        self.ent_subj = ctk.CTkEntry(r2, textvariable=self.var_subject, width=200, height=30,
-                                     corner_radius=8, border_color=BORDER, font=self.f)
-        self.ent_subj.pack(side="left", padx=8)
-        ctk.CTkLabel(r2, text="留空自动判断　·　联网核对来源", font=self.f_sm, text_color=SUB).pack(side="left", padx=(2, 8))
-        self.cmb_prov = ctk.CTkOptionMenu(r2, variable=self.var_provider, width=120, height=30,
-                                          corner_radius=8, font=self.f, fg_color=CARD, text_color=TEXT,
-                                          button_color=ACCENT, button_hover_color=ACCENT_H,
+        # ---- 资料与设置（低频，可折叠；已配置后默认收起，让内容区占主视觉）----
+        c1, sbody = self._collapsible(content, "settings", "资料与设置",
+                                      "选择资料文件夹、学科与生成偏好 · 点此展开/收起")
+        c1.pack(fill="x", pady=(0, 14))
+
+        r1 = ctk.CTkFrame(sbody, fg_color="transparent")
+        r1.pack(fill="x", padx=22, pady=5)
+        ctk.CTkLabel(r1, text="资料文件夹", font=self.fb, text_color=TEXT,
+                     width=90, anchor="w").pack(side="left")
+        self.ent_src = ctk.CTkEntry(r1, textvariable=self.var_source, height=36, corner_radius=9,
+                                    fg_color=SURFACE_SOFT, text_color=TEXT, border_width=0,
+                                    font=self.f, state="readonly")
+        self.ent_src.pack(side="left", fill="x", expand=True, padx=(8, 10))
+        self.btn_choose = self._ghost(r1, "选择资料", self._choose_source, 92)
+        self.btn_choose.pack(side="left")
+        self._ghost(r1, "设置 / 修改密钥", self._ask_key, 128).pack(side="left", padx=(8, 0))
+
+        r2 = ctk.CTkFrame(sbody, fg_color="transparent")
+        r2.pack(fill="x", padx=22, pady=5)
+        ctk.CTkLabel(r2, text="学科名称", font=self.fb, text_color=TEXT,
+                     width=90, anchor="w").pack(side="left")
+        self.ent_subj = ctk.CTkEntry(r2, textvariable=self.var_subject, width=200, height=36,
+                                     corner_radius=9, fg_color=SURFACE_SOFT, text_color=TEXT,
+                                     border_width=0, font=self.f)
+        self.ent_subj.pack(side="left", padx=(8, 10))
+        ctk.CTkLabel(r2, text="留空将自动判断", font=self.f_sm, text_color=SUB).pack(side="left", padx=(0, 18))
+        ctk.CTkLabel(r2, text="联网核对来源", font=self.f_sm, text_color=SUB).pack(side="left", padx=(0, 8))
+        self.cmb_prov = ctk.CTkOptionMenu(r2, variable=self.var_provider, width=126, height=36,
+                                          corner_radius=9, font=self.f, fg_color=SURFACE_SOFT,
+                                          text_color=TEXT, button_color=ACCENT,
+                                          button_hover_color=ACCENT_H, dropdown_fg_color=CARD,
                                           values=["bing_cn", "pubmed", "ddg", "tavily", "serper", "bing"])
         self.cmb_prov.pack(side="left")
-        self._ghost(r2, "设置检索Key", self._set_search_key, 110).pack(side="left", padx=8)
+        self._ghost(r2, "设置检索 Key", self._set_search_key, 116).pack(side="left", padx=8)
 
-        ctk.CTkLabel(c1, text="课程说明 / 整理偏好（可选，因地制宜，不会突破“忠实原文”铁律）",
-                     font=self.f_sm, text_color=SUB).pack(anchor="w", padx=16, pady=(4, 0))
-        self.txt_note = ctk.CTkTextbox(c1, height=40, corner_radius=8, border_width=1,
-                                       border_color=BORDER, font=self.f, fg_color="#FBFCFE")
-        self.txt_note.pack(fill="x", padx=16, pady=(2, 4))
-        r3 = ctk.CTkFrame(c1, fg_color=CARD); r3.pack(fill="x", padx=16, pady=(0, 10))
+        ctk.CTkLabel(sbody, text="课程说明 / 整理偏好（可选；辅助组织表达，不会突破“忠实原文”铁律）",
+                     font=self.f_sm, text_color=SUB).pack(anchor="w", padx=22, pady=(8, 2))
+        self.txt_note = ctk.CTkTextbox(sbody, height=34, corner_radius=9, border_width=0,
+                                       font=self.f, fg_color=SURFACE_SOFT, text_color=TEXT)
+        self.txt_note.pack(fill="x", padx=22, pady=(2, 8))
+        r3 = ctk.CTkFrame(sbody, fg_color="transparent")
+        r3.pack(fill="x", padx=22, pady=(0, 14))
         self._ghost(r3, "保存设置", self._save_prefs, 96).pack(side="left")
-        self._ghost(r3, "检查分享包是否含密钥", self._check_share_keys, 170).pack(side="left", padx=8)
-        ctk.CTkLabel(r3, text=f"密钥保存在 {ENV_PATH}", font=self.f_sm, text_color="#AAB2BD").pack(side="left", padx=4)
+        self._ghost(r3, "检查分享包是否含密钥", self._check_share_keys, 168).pack(side="left", padx=8)
+        ctk.CTkLabel(r3, text=f"密钥仅保存在本机：{ENV_PATH}", font=self.f_sm,
+                     text_color=SUB).pack(side="left", padx=4)
 
-        # ---- 卡片2：流程 ----
-        c2 = self._card(root)
-        c2.pack(fill="both", expand=True, padx=22, pady=5)
-        bar = ctk.CTkFrame(c2, fg_color=CARD); bar.pack(fill="x", padx=16, pady=(10, 4))
-        self.btn_audit = self._primary(bar, "⟳  审计资料 / 刷新映射", self._do_audit, 190)
+        # ---- 章节与详情（内容主舞台）----
+        c2 = self._card(content)
+        c2.pack(fill="both", expand=True)
+        self._section(c2, "章节", "审计资料 → 选择章节 → 生成背诵稿 → 联网核对")
+
+        bar = ctk.CTkFrame(c2, fg_color="transparent")
+        bar.pack(fill="x", padx=22, pady=(0, 10))
+        self.btn_audit = self._primary(bar, "审计资料 / 刷新映射", self._do_audit, 180)
         self.btn_audit.pack(side="left")
-        ctk.CTkLabel(bar, text="  自动判定学科、把课件对到大纲各章；勾选☑选章，点行看右侧详情",
-                     font=self.f_sm, text_color=SUB).pack(side="left", padx=8)
+        ctk.CTkLabel(bar, text="把课件与课本对应到大纲各章；点击某一行查看右侧详情。",
+                     font=self.f_sm, text_color=SUB).pack(side="left", padx=12)
 
-        body = ctk.CTkFrame(c2, fg_color=CARD); body.pack(fill="both", expand=True, padx=16, pady=4)
-        left = ctk.CTkFrame(body, fg_color=CARD); left.pack(side="left", fill="both", expand=True)
+        body = ctk.CTkFrame(c2, fg_color="transparent")
+        left = ctk.CTkFrame(body, fg_color="transparent")
+        left.pack(side="left", fill="both", expand=True)
         self._build_table(left)
-        # 详情面板
-        self.detail = self._card(body, width=312)
-        self.detail.pack(side="right", fill="y", padx=(12, 0))
+
+        # 右侧详情/预览：放大、衬线、宽行距，像一本排印精良的书页。
+        self.detail = self._card(body, width=460, fg_color=SURFACE_SOFT, border_width=0)
+        self.detail.pack(side="right", fill="y", padx=(18, 0))
         self.detail.pack_propagate(False)
-        ctk.CTkLabel(self.detail, text="章节详情", font=self.fb, text_color="#111827").pack(
-            anchor="w", padx=14, pady=(12, 4))
-        self.detail_box = ctk.CTkTextbox(self.detail, corner_radius=0, font=self.f_sm,
-                                         fg_color=CARD, border_width=0)
-        self.detail_box.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        ctk.CTkLabel(self.detail, text="章节详情", font=self.f_serif_sec,
+                     text_color=INK).pack(anchor="w", padx=20, pady=(16, 4))
+        self.detail_box = ctk.CTkTextbox(self.detail, corner_radius=10, font=self.f_read,
+                                         fg_color=CARD, text_color=TEXT, border_width=0,
+                                         wrap="word")
+        self.detail_box.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        try:
+            self.detail_box._textbox.configure(spacing1=5, spacing2=4, spacing3=7,
+                                               padx=14, pady=12)
+        except Exception:
+            pass
 
-        btns = ctk.CTkFrame(c2, fg_color=CARD); btns.pack(fill="x", padx=16, pady=(2, 12))
-        b = self._ghost(btns, "全选", self._select_all, 70); b.pack(side="left", padx=2); self._need_audit.append(b)
-        b = self._ghost(btns, "全不选", self._select_none, 78); b.pack(side="left", padx=2); self._need_audit.append(b)
-        self.chk_ow = ctk.CTkCheckBox(btns, text="覆盖重做", variable=self.var_overwrite, font=self.f)
-        self.chk_ow.pack(side="left", padx=(14, 6))
-        self.btn_gen = self._primary(btns, "▶  生成所选章节", self._do_generate, 150)
-        self.btn_gen.pack(side="left", padx=4); self._need_audit.append(self.btn_gen)
-        b = self._ghost(btns, "生成全部未完成", self._do_generate_pending, 130); b.pack(side="left", padx=2); self._need_audit.append(b)
-        b = self._ghost(btns, "联网核对补充项", self._do_verify, 130); b.pack(side="left", padx=(14, 2)); self._need_output.append(b)
-        b = self._ghost(btns, "待核清单", self._show_gaps, 92); b.pack(side="left", padx=2); self._need_output.append(b)
-        b = self._ghost(btns, "打开输出文件夹", self._open_output, 124); b.pack(side="left", padx=2); self._need_output.append(b)
+        btns = ctk.CTkFrame(c2, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=22, pady=(2, 16))
+        b = self._ghost(btns, "全选", self._select_all, 68)
+        b.pack(side="left", padx=2); self._need_audit.append(b)
+        b = self._ghost(btns, "全不选", self._select_none, 74)
+        b.pack(side="left", padx=2); self._need_audit.append(b)
+        self.chk_ow = ctk.CTkCheckBox(btns, text="覆盖重做", variable=self.var_overwrite,
+                                       font=self.f, text_color=TEXT, fg_color=ACCENT,
+                                       hover_color=ACCENT_H, border_color=SUB)
+        self.chk_ow.pack(side="left", padx=(12, 6))
+        self.btn_gen = self._primary(btns, "生成所选章节", self._do_generate, 132)
+        self.btn_gen.pack(side="left", padx=2); self._need_audit.append(self.btn_gen)
+        b = self._ghost(btns, "生成全部未完成", self._do_generate_pending, 122)
+        b.pack(side="left", padx=2); self._need_audit.append(b)
+        ctk.CTkFrame(btns, width=1, height=22, fg_color=LINE).pack(side="left", padx=10)
+        b = self._ghost(btns, "联网核对补充项", self._do_verify, 124)
+        b.pack(side="left", padx=2); self._need_output.append(b)
+        b = self._ghost(btns, "待核清单", self._show_gaps, 90)
+        b.pack(side="left", padx=2); self._need_output.append(b)
+        b = self._ghost(btns, "打开输出文件夹", self._open_output, 118)
+        b.pack(side="left", padx=2); self._need_output.append(b)
 
-        # ---- 进度 ----
-        pf = ctk.CTkFrame(root, fg_color=CANVAS); pf.pack(fill="x", padx=24, pady=(4, 2))
+        body.pack(side="top", fill="both", expand=True, padx=22, pady=(0, 6))
+
+        # ---- 运行反馈：仅在任务进行中显示进度条，空闲时不挤占空间。 ----
+        pf = ctk.CTkFrame(root, fg_color=CANVAS)
         self.lbl_phase = ctk.CTkLabel(pf, text="", font=self.f_sm, text_color=ACCENT, anchor="w")
         self.lbl_phase.pack(side="left", fill="x", expand=True)
         self.progress = ctk.CTkProgressBar(pf, width=280, height=8, corner_radius=4,
-                                           progress_color=ACCENT)
-        self.progress.set(0)        # 仅运行中显示（见 _set_busy），空闲不占位、不留“蓝点”
+                                           progress_color=ACCENT, fg_color=SURFACE_SOFT)
+        self.progress.set(0)
 
-        # ---- 日志（深色终端，固定高度，始终可见）----
-        lg = self._card(root); lg.pack(fill="x", expand=False, padx=22, pady=(5, 12))
-        ctk.CTkLabel(lg, text="运行日志", font=self.fb, text_color="#111827").pack(anchor="w", padx=16, pady=(8, 2))
-        self.log = ctk.CTkTextbox(lg, height=128, corner_radius=10, font=self.f_mono,
-                                  fg_color="#1E1E1E", text_color="#D4D4D4")
-        self.log.pack(fill="x", padx=14, pady=(0, 12))
+        # ---- 运行日志：暖纸面、安静、按行着色；不喧宾夺主。 ----
+        lg = ctk.CTkFrame(root, fg_color="transparent")
+        lg.pack(side="bottom", fill="x", expand=False, padx=30, pady=(4, 16))
+        ctk.CTkLabel(lg, text="运行日志", font=self.f_sm, text_color=SUB).pack(
+            anchor="w", padx=2, pady=(0, 2))
+        self.log = ctk.CTkTextbox(lg, height=52, corner_radius=10, font=self.f_mono,
+                                  fg_color=SURFACE_SOFT, text_color=TEXT, border_width=0)
+        self.log.pack(fill="x")
         self.log.configure(state="disabled")
         t = self.log._textbox
-        t.tag_configure("head", foreground="#4FC1FF")
-        t.tag_configure("ok", foreground="#4EC9B0")
-        t.tag_configure("warn", foreground="#DCDCAA")
-        t.tag_configure("err", foreground="#F48771")
-        t.tag_configure("muted", foreground="#9AA0A6")
+        t.tag_configure("head", foreground=ACCENT)
+        t.tag_configure("ok", foreground=OKC)
+        t.tag_configure("warn", foreground=WARNC)
+        t.tag_configure("err", foreground=ERRC)
+        t.tag_configure("muted", foreground=SUB)
+
+        # 固定区先占位，工作区才会在它们之上弹性缩放；避免低分辨率下遮住操作按钮。
+        pf.pack(side="bottom", fill="x", padx=30, pady=(4, 2))
+        content.pack(side="top", fill="both", expand=True, padx=30, pady=(4, 4))
 
     # ---------- 自定义现代表格 ----------
-    TBL = [("☑", 44, "center"), ("状态", 96, "w"), ("章序", 56, "center"),
-           ("章名", 130, "w"), ("素材文件", 300, "w"), ("大纲字", 64, "e")]
+    TBL = [("☑", 44, "center"), ("状态", 92, "w"), ("章序", 58, "center"),
+           ("章名", 142, "w"), ("素材文件", 300, "w"), ("大纲字", 64, "e")]
 
     def _build_table(self, parent):
-        head = ctk.CTkFrame(parent, fg_color="#EAEEF4", corner_radius=8, height=38)
-        head.pack(fill="x", pady=(0, 4))
+        head = ctk.CTkFrame(parent, fg_color=HEADBG, corner_radius=10, height=42)
+        head.pack(fill="x", pady=(0, 6))
         head.pack_propagate(False)
         for t, w, a in self.TBL:
             ctk.CTkLabel(head, text=t, width=w, font=self.fb, text_color=SUB,
                          anchor={"center": "center", "e": "e"}.get(a, "w")).pack(
                 side="left", padx=(10 if t == "☑" else 2, 2))
-        self.rows = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10)
+        self.rows = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10,
+                                            border_width=0)
         self.rows.pack(fill="both", expand=True)
 
     def _refresh_chapters(self):
@@ -273,17 +436,17 @@ class App:
             self._log("【审计告警】\n" + "\n".join("  ! " + w for w in audit["warnings"]) + "\n")
 
     def _add_row(self, pos, stat, scol, ch, src):
-        base = CARD if pos % 2 == 0 else ZEBRA
-        row = ctk.CTkFrame(self.rows, fg_color=base, corner_radius=6, height=36)
-        row.pack(fill="x", pady=1, padx=1)
+        base = ZEBRA if pos % 2 else CARD
+        row = ctk.CTkFrame(self.rows, fg_color=base, corner_radius=8, height=40)
+        row.pack(fill="x", pady=2, padx=2)
         row.pack_propagate(False)
         var = ctk.BooleanVar(value=False)
         cb = ctk.CTkCheckBox(row, text="", width=24, checkbox_width=18, checkbox_height=18,
                              variable=var, command=lambda p=pos: self._toggle(p),
-                             fg_color=ACCENT, hover_color=ACCENT_H)
+                             fg_color=ACCENT, hover_color=ACCENT_H, border_color=SUB)
         cb.pack(side="left", padx=(14, 0))
         cells = [(stat, 96, "w", scol), (str(ch.get("index")), 56, "center", TEXT),
-                 (ch.get("title", ""), 130, "w", TEXT), (src, 300, "w", "#475467"),
+                 (ch.get("title", ""), 130, "w", INK), (src, 300, "w", SUB),
                  (str(len(ch.get("outline_excerpt", ""))), 64, "e", SUB)]
         labels = []
         for txt, w, a, col in cells:
@@ -367,13 +530,13 @@ class App:
     def _set_detail_hint(self):
         self.detail_box.configure(state="normal")
         self.detail_box.delete("1.0", "end")
-        self.detail_box.insert("1.0", "\n\n   ▤\n\n   点选左侧某一章，\n   这里显示它的素材、大纲摘录、\n   输出状态与待核情况。")
+        self.detail_box.insert("1.0", "\n\n点选左侧某一章，\n\n这里会显示它的素材来源、\n大纲摘录、输出状态与待核情况。")
         self.detail_box.configure(state="disabled")
 
     # ---------- Key / 检索源 / 上下文 ----------
     def _set_keystat(self, ok):
-        self.lbl_keystat.configure(text="已设置 ✓" if ok else "未设置 ✗",
-                                   text_color=OKC if ok else ERRC)
+        self.lbl_keystat.configure(text="● API Key 已设置" if ok else "● API Key 未设置",
+                                   text_color=OKC if ok else ERRC, fg_color="transparent")
         self._update_actions()
 
     def _ensure_key(self):
@@ -807,8 +970,13 @@ class App:
         win.title("待核清单 · 〔补〕补充内容（课件未含，可能不准确，请核对）")
         win.geometry("720x520")
         win.configure(fg_color=CANVAS)
-        box = ctk.CTkTextbox(win, font=self.f, corner_radius=10)
-        box.pack(fill="both", expand=True, padx=12, pady=12)
+        box = ctk.CTkTextbox(win, font=self.f_read, corner_radius=12, fg_color=CARD,
+                             text_color=TEXT, border_width=0, wrap="word")
+        box.pack(fill="both", expand=True, padx=16, pady=16)
+        try:
+            box._textbox.configure(spacing1=5, spacing3=6, padx=14, pady=12)
+        except Exception:
+            pass
         total = sum(len(v) for v in gaps.values())
         box.insert("end", f"共 {len(gaps)} 章有 {total} 处 〔补〕 补充内容（可能不准确，请核对）：\n\n")
         for title, items in gaps.items():

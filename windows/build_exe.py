@@ -2,6 +2,7 @@
   python build_exe.py            -> onedir（默认，启动快；产物是 dist/背诵稿生成器 文件夹）
   python build_exe.py onefile    -> 单文件（分发方便，但每次启动要解压、较慢）
 产物不含任何 API Key，每个人首次运行填自己的 Key。"""
+import os
 import sys
 import shutil
 from pathlib import Path
@@ -52,6 +53,23 @@ def main():
         print("检测到 python-pptx：exe 将支持 .pptx 原生课件。")
     except ImportError:
         print("未装 python-pptx：exe 仅支持 PDF/txt/md（如需 pptx 请先 pip install python-pptx）。")
+
+    # Web 版（pywebview + WebView2）：打包前端资源 + pywebview/pythonnet 运行时
+    web = HERE / "recite" / "web" / "index.html"
+    if web.exists():
+        args += ["--add-data", f"{web}{os.pathsep}recite/web"]
+    try:
+        import webview  # noqa
+        args += ["--collect-all", "webview", "--hidden-import", "clr"]
+        for pkg in ("clr_loader", "pythonnet"):
+            try:
+                __import__(pkg)
+                args += ["--collect-all", pkg]
+            except Exception:
+                pass
+        print("检测到 pywebview：exe 将优先使用 Web 版界面（目标机需 WebView2，Win11 预装）。")
+    except ImportError:
+        print("未装 pywebview：exe 退回 CustomTkinter 界面。")
 
     try:
         import customtkinter  # noqa

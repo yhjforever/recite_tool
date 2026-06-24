@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>背诵稿生成器</title>
+<style>
+:root{
+  --paper:#FAF6EF; --card:#FFFDF9; --soft:#F3ECE0; --ink:#33302A; --text:#4A443B;
+  --sub:#8C8273; --accent:#2C6B5E; --accent-h:#23574B; --ok:#4B7A5B; --warn:#A9762F;
+  --err:#9C4A3C; --line:#EADFCD; --border:#E7DECF; --sel:#E3EEE7; --hover:#F2EADC;
+  --zebra:#FBF7EF; --head:#F1E9DA;
+  --serif:"Noto Serif SC","Source Han Serif SC","STZhongsong","华文中宋","仿宋",serif;
+  --sans:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;
+  --shadow:0 10px 28px rgba(92,68,34,.10), 0 2px 6px rgba(92,68,34,.05);
+  --shadow-sm:0 4px 12px rgba(92,68,34,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);color:var(--text);
+  font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased;
+  user-select:none;cursor:default;overflow:hidden}
+body{display:flex;flex-direction:column;height:100vh}
+
+/* 自绘标题栏（无系统冷色标题栏，纸色融为一体）*/
+.titlebar{flex:0 0 auto;height:32px;display:flex;align-items:stretch;background:var(--paper)}
+.tb-drag{flex:1 1 auto}                    /* pywebview-drag-region：拖动窗口 */
+.tb-ctrls{display:flex}
+.tbtn{width:46px;border:0;background:transparent;display:flex;align-items:center;
+  justify-content:center;cursor:default;color:#9C9384;transition:background .12s,color .12s}
+.tbtn:hover{background:rgba(120,108,86,.14);color:var(--ink)}
+.tbtn.close:hover{background:#B5483A;color:#fff}
+.tbtn i{display:block;position:relative}
+.ic-min{width:11px;height:0;border-bottom:1.5px solid currentColor}
+.ic-max{width:11px;height:11px;border:1.5px solid currentColor;border-radius:2px}
+.ic-restore{width:9px;height:9px;border:1.5px solid currentColor;border-radius:1px}
+.ic-restore:before{content:"";position:absolute;left:2.5px;top:-3.5px;width:9px;height:9px;
+  border:1.5px solid currentColor;border-radius:1px;border-bottom:0;border-left:0}
+.ic-close{width:13px;height:13px}
+.ic-close:before,.ic-close:after{content:"";position:absolute;left:6px;top:0;width:1.6px;height:14px;
+  background:currentColor;border-radius:1px}
+.ic-close:before{transform:rotate(45deg)} .ic-close:after{transform:rotate(-45deg)}
+#tb-max .ic-restore{display:none}
+#tb-max.is-max .ic-max{display:none}
+#tb-max.is-max .ic-restore{display:block}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:#DACFBD;border-radius:6px;border:3px solid var(--paper)}
+::-webkit-scrollbar-thumb:hover{background:#C8BBA4}
+::-webkit-scrollbar-track{background:transparent}
+
+.app{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;padding:0 26px 14px}
+
+/* 顶部 */
+.header{display:flex;align-items:baseline;gap:18px;padding:8px 4px 12px;flex:0 0 auto}
+.brand{font-family:var(--serif);font-weight:700;font-size:23px;color:var(--ink);
+  letter-spacing:.5px}
+.statline{margin-left:auto;display:flex;align-items:center;gap:18px;color:var(--sub);font-size:12.5px}
+.kv b{color:var(--ink);font-weight:600}
+.dot{font-weight:700}
+.dot.on{color:var(--ok)} .dot.off{color:var(--err)}
+
+/* 卡片 */
+.card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);margin-bottom:14px;
+  border:1px solid rgba(231,222,207,.7)}
+.sec-head{display:flex;align-items:center;gap:12px;padding:13px 22px}
+.sec-head .ttl{font-family:var(--serif);font-weight:700;font-size:16px;color:var(--ink)}
+.sec-head .hint{color:var(--sub);font-size:12.5px}
+
+/* 折叠：CSS 平滑过渡，无残影 */
+.collapser{cursor:pointer;user-select:none}
+.caret{display:inline-block;width:14px;color:var(--sub);transition:transform .22s ease;font-size:12px}
+.collapsed .caret{transform:rotate(-90deg)}
+.foldbody{max-height:520px;opacity:1;overflow:hidden;
+  transition:max-height .28s ease, opacity .22s ease}
+.collapsed .foldbody{max-height:0;opacity:0}
+
+/* 设置区 */
+.row{display:flex;align-items:center;gap:10px;padding:5px 22px}
+.row .lab{width:78px;color:var(--text);font-weight:600;flex:0 0 auto}
+input.fld,textarea.fld,select.fld{font-family:var(--sans);font-size:13.5px;color:var(--text);
+  background:var(--soft);border:1px solid var(--border);border-radius:8px;padding:8px 11px;
+  outline:none;transition:border-color .15s, box-shadow .15s;cursor:text}
+input.fld:focus,textarea.fld:focus,select.fld:focus{border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(44,107,94,.12)}
+input.fld[readonly]{cursor:default;color:var(--sub)}
+select.fld{cursor:pointer}
+textarea.fld{resize:none;width:100%;line-height:1.6}
+.grow{flex:1 1 auto;min-width:0}
+.muted{color:var(--sub);font-size:12.5px}
+.subtle{padding:2px 22px 0;color:var(--sub);font-size:12.5px}
+
+/* 按钮 */
+.btn{font-family:var(--sans);font-size:13.5px;border:1px solid var(--border);background:var(--card);
+  color:var(--text);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;
+  transition:background .15s, border-color .15s, transform .06s, box-shadow .15s;white-space:nowrap}
+.btn:hover{background:var(--hover);border-color:#D9CDB6}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.btn.primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn:disabled:hover{background:var(--card);border-color:var(--border)}
+.sep{width:1px;height:22px;background:var(--line);margin:0 6px}
+
+/* 章节区 */
+.chapters{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.auditbar{display:flex;align-items:center;gap:12px;padding:2px 22px 10px}
+.work{display:flex;gap:16px;flex:1 1 auto;min-height:0;padding:0 22px}
+.tablewrap{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
+.thead,.trow{display:grid;grid-template-columns:42px 96px 56px 1fr 1.5fr 64px;align-items:center;gap:6px}
+.thead{padding:9px 12px;color:var(--sub);font-weight:700;font-size:12.5px;
+  background:var(--head);border-radius:10px;margin-bottom:5px}
+.tbody{flex:1 1 auto;overflow-y:auto;padding-right:4px}
+.trow{padding:9px 12px;border-radius:9px;margin-bottom:3px;cursor:pointer;
+  transition:background .12s}
+.trow:nth-child(even){background:var(--zebra)}
+.trow:hover{background:var(--hover)}
+.trow.sel{background:var(--sel);box-shadow:inset 0 0 0 1px rgba(44,107,94,.25)}
+.trow .c{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .src{color:#7A6E5B}
+.trow .num,.thead .num{text-align:center}
+.trow .oc,.thead .oc{text-align:right;color:var(--sub)}
+.st-done{color:var(--ok);font-weight:600}
+.st-part{color:var(--warn);font-weight:600}
+.st-none{color:var(--sub)}
+.cbx{width:17px;height:17px;cursor:pointer;accent-color:var(--accent)}
+.empty{padding:26px;text-align:center;color:var(--sub)}
+
+/* 阅读区（章节详情）—— 书卷气 */
+.reader{flex:0 0 430px;display:flex;flex-direction:column;background:var(--soft);
+  border-radius:14px;border:1px solid rgba(231,222,207,.8);overflow:hidden}
+.reader .rtitle{font-family:var(--serif);font-weight:700;font-size:15px;color:var(--ink);
+  padding:13px 18px 8px}
+.reader .rbody{flex:1 1 auto;overflow-y:auto;padding:0 18px 16px;font-family:var(--serif);
+  font-size:14px;line-height:1.95;letter-spacing:.3px;color:var(--text);user-select:text;cursor:auto}
+.reader .rbody h4{font-family:var(--serif);font-size:13px;color:var(--sub);font-weight:600;
+  margin:14px 0 4px;letter-spacing:1px}
+.reader .rbody .excerpt{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;white-space:pre-wrap;line-height:2.0}
+.reader .rbody .hintbox{color:var(--sub);line-height:2.1;padding-top:30px;text-align:center;font-size:13.5px}
+.tag{display:inline-block;font-family:var(--sans);font-size:12px;padding:1px 8px;border-radius:6px;
+  font-weight:600}
+.tag.ok{background:#E3EEE7;color:var(--ok)} .tag.part{background:#F6ECD9;color:var(--warn)}
+.tag.none{background:#EFE7D8;color:var(--sub)}
+
+.actions{display:flex;align-items:center;gap:8px;padding:12px 22px 14px;flex-wrap:wrap}
+.chk{display:flex;align-items:center;gap:7px;color:var(--text);cursor:pointer;font-weight:600;
+  margin:0 4px}
+
+/* 进度 + 日志 */
+.progress{display:none;align-items:center;gap:14px;padding:2px 26px}
+.progress.show{display:flex}
+.phase{flex:1 1 auto;color:var(--accent);font-size:12.5px;font-weight:600}
+.bar{width:280px;height:8px;background:#E7DCC9;border-radius:5px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--accent);border-radius:5px;
+  transition:width .2s ease}
+.bar.indet>i{width:35%;animation:slide 1.1s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+
+.logcard{flex:0 0 auto}
+.log{height:88px;overflow-y:auto;margin:0 14px 12px;padding:10px 14px;background:var(--soft);
+  border:1px solid var(--border);border-radius:10px;font-family:Consolas,"Courier New",monospace;
+  font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text);user-select:text;cursor:auto}
+.log .l-head{color:var(--accent);font-weight:700}
+.log .l-ok{color:var(--ok)} .log .l-warn{color:var(--warn)} .log .l-err{color:var(--err)}
+.log .l-muted{color:var(--sub)}
+
+/* 模态 */
+.scrim{position:fixed;inset:0;background:rgba(51,46,36,.34);display:none;align-items:center;
+  justify-content:center;z-index:50;backdrop-filter:blur(2px)}
+.scrim.show{display:flex}
+.modal{background:var(--card);border-radius:16px;box-shadow:0 24px 60px rgba(51,46,36,.3);
+  width:min(640px,90vw);max-height:84vh;overflow:auto;padding:22px 24px;
+  animation:pop .18s ease}
+@keyframes pop{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.modal h3{font-family:var(--serif);color:var(--ink);margin:0 0 6px;font-size:18px}
+.modal p{color:var(--sub);margin:0 0 14px;line-height:1.7}
+.modal .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.modal input{width:100%;font-size:14px;padding:10px 12px;border-radius:9px;border:1px solid var(--border);
+  background:var(--soft);outline:none}
+.modal input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(44,107,94,.12)}
+.gaplist{font-family:var(--serif);line-height:1.95;color:var(--text);user-select:text}
+.gaplist .gh{font-weight:700;color:var(--ink);margin-top:12px}
+.gaplist .gi{padding-left:18px;color:var(--text)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(20px);
+  background:var(--ink);color:#fff;padding:11px 20px;border-radius:10px;font-size:13.5px;
+  box-shadow:0 12px 30px rgba(0,0,0,.25);opacity:0;transition:all .25s ease;z-index:60;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.warn{background:#7A4A1E} .toast.err{background:#7E2D22} .toast.ok{background:#2C5E45}
+</style>
+</head>
+<body>
+<!-- 自绘标题栏：左侧拖动区 + 右侧窗口控制 -->
+<div class="titlebar">
+  <div class="tb-drag pywebview-drag-region" ondblclick="winMax()"></div>
+  <div class="tb-ctrls">
+    <button class="tbtn" onclick="winMin()" title="最小化"><i class="ic-min"></i></button>
+    <button class="tbtn" id="tb-max" onclick="winMax()" title="最大化 / 还原"><i class="ic-max"></i><i class="ic-restore"></i></button>
+    <button class="tbtn close" onclick="winClose()" title="关闭"><i class="ic-close"></i></button>
+  </div>
+</div>
+<div class="app">
+  <!-- 顶部 -->
+  <div class="header">
+    <div class="brand">背诵稿生成器</div>
+    <div class="statline">
+      <span class="kv">学科 <b id="st-subject">—</b></span>
+      <span class="kv">章节 <b id="st-n">0</b></span>
+      <span class="kv">已完成 <b id="st-done">0</b></span>
+      <span id="st-search">检索源 —</span>
+      <span><span id="st-keydot" class="dot off">●</span> <span id="st-key">API Key 未设置</span></span>
+    </div>
+  </div>
+
+  <!-- 资料与设置（可折叠） -->
+  <div class="card" id="settings">
+    <div class="sec-head collapser" onclick="toggleSettings()">
+      <span class="ttl"><span class="caret">▾</span> 资料与设置</span>
+      <span class="hint">选择资料文件夹、学科与生成偏好 · 点此展开/收起</span>
+    </div>
+    <div class="foldbody">
+      <div class="row">
+        <span class="lab">资料文件夹</span>
+        <input id="f-source" class="fld grow" readonly placeholder="（未选择）">
+        <button class="btn" onclick="chooseSource()">选择资料</button>
+        <button class="btn" onclick="askKey()">设置 / 修改密钥</button>
+      </div>
+      <div class="row">
+        <span class="lab">学科名称</span>
+        <input id="f-subject" class="fld" style="width:200px" placeholder="留空将自动判断" oninput="dirtyPrefs()">
+        <span class="muted">留空将自动判断</span>
+        <span class="muted" style="margin-left:8px">联网核对来源</span>
+        <select id="f-provider" class="fld" onchange="onProviderChange()"></select>
+        <button class="btn" onclick="setSearchKey()">设置检索 Key</button>
+      </div>
+      <div class="subtle">课程说明 / 整理偏好（可选；辅助组织表达，不会突破“忠实原文”铁律）</div>
+      <div class="row"><textarea id="f-note" class="fld" rows="2" oninput="dirtyPrefs()"></textarea></div>
+      <div class="row" style="padding-bottom:13px">
+        <button class="btn" onclick="savePrefs(true)">保存设置</button>
+        <button class="btn" onclick="checkShare()">检查分享包是否含密钥</button>
+        <span class="muted" id="f-envpath"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 章节 -->
+  <div class="card chapters">
+    <div class="sec-head"><span class="ttl">章节</span>
+      <span class="hint">审计资料 → 选择章节 → 生成背诵稿 → 联网核对</span></div>
+    <div class="auditbar">
+      <button id="b-audit" class="btn primary" onclick="runAudit()">审计资料 / 刷新映射</button>
+      <span class="muted">把课件与课本对应到大纲各章；点击行可查看章节详情。</span>
+    </div>
+    <div class="work">
+      <div class="tablewrap">
+        <div class="thead">
+          <span style="text-align:center">☑</span><span>状态</span><span class="num">章序</span>
+          <span>章名</span><span>素材文件</span><span class="oc">大纲字</span>
+        </div>
+        <div id="tbody" class="tbody"></div>
+      </div>
+      <div class="reader">
+        <div class="rtitle">章节详情</div>
+        <div id="reader" class="rbody"><div class="hintbox">点选左侧某一章，<br>这里会显示它的素材来源、<br>大纲摘录、输出状态与待核情况。</div></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn na" onclick="selectAll(true)">全选</button>
+      <button class="btn na" onclick="selectAll(false)">全不选</button>
+      <label class="chk"><input type="checkbox" id="f-overwrite" class="cbx">覆盖重做</label>
+      <button class="btn primary na" onclick="runGenerate()">生成所选章节</button>
+      <button class="btn na" onclick="runGeneratePending()">生成全部未完成</button>
+      <span class="sep"></span>
+      <button class="btn no" onclick="runVerify()">联网核对补充项</button>
+      <button class="btn no" onclick="showGaps()">待核清单</button>
+      <button class="btn no" onclick="openOutput()">打开输出文件夹</button>
+    </div>
+  </div>
+
+  <!-- 进度 -->
+  <div id="progress" class="progress">
+    <span id="phase" class="phase"></span>
+    <div id="bar" class="bar"><i id="bari"></i></div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="card logcard">
+    <div class="sec-head" style="padding-bottom:4px"><span class="ttl" style="font-size:14px">运行日志</span></div>
+    <div id="log" class="log"></div>
+  </div>
+</div>
+
+<!-- 模态：密钥输入 -->
+<div id="m-key" class="scrim"><div class="modal">
+  <h3 id="key-title">DeepSeek API Key</h3>
+  <p id="key-desc"></p>
+  <input id="key-input" type="password" placeholder="sk- 开头" autocomplete="off">
+  <div class="mbtns"><button class="btn" onclick="hide('m-key')">取消</button>
+    <button class="btn primary" onclick="submitKey()">保存</button></div>
+</div></div>
+
+<!-- 模态：检索 Key -->
+<div id="m-skey" class="scrim"><div class="modal">
+  <h3 id="skey-title">检索 Key</h3>
+  <p id="skey-desc"></p>
+  <input id="skey-input" type="password" placeholder="API Key" autocomplete="off">
+  <div class="mbtns"><button class="btn" onclick="hide('m-skey')">取消</button>
+    <button class="btn primary" onclick="submitSearchKey()">保存</button></div>
+</div></div>
+
+<!-- 模态：待核清单 -->
+<div id="m-gaps" class="scrim"><div class="modal">
+  <h3>待核清单 · 〔补〕补充内容</h3>
+  <p>课件未含、据权威资料补充，可能不准确，请核对并以你的补充为准。</p>
+  <div id="gaps-body" class="gaplist"></div>
+  <div class="mbtns"><button class="btn primary" onclick="hide('m-gaps')">关闭</button></div>
+</div></div>
+
+<!-- 模态：通用确认 -->
+<div id="m-confirm" class="scrim"><div class="modal">
+  <h3 id="cf-title">确认</h3><p id="cf-desc"></p>
+  <div class="mbtns"><button class="btn" onclick="hide('m-confirm')">取消</button>
+    <button class="btn primary" id="cf-ok">确定</button></div>
+</div></div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let S = { chapters:[], checked:new Set(), sel:null, busy:false, hasOutput:false,
+          providers:[], keyless:[], hasKey:false };
+
+/* ---------- 工具 ---------- */
+function $(id){return document.getElementById(id);}
+function api(){return window.pywebview.api;}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function show(id){$(id).classList.add('show');}
+function hide(id){$(id).classList.remove('show');}
+let toastT=null;
+function toast(msg,kind){const t=$('toast');t.className='toast '+(kind||'');t.textContent=msg;
+  t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);}
+function confirmBox(title,desc,onok){$('cf-title').textContent=title;$('cf-desc').textContent=desc;
+  const b=$('cf-ok');b.onclick=()=>{hide('m-confirm');onok();};show('m-confirm');}
+
+/* ---------- 初始化 ----------
+   桥(window.pywebview.api)及其方法是异步挂载的，存在竞态：直接重试 get_init() 本身，
+   抛错就退避重试，成功才标记 booted 并渲染——与“方法如何表示”无关，最稳。 */
+let _booted=false, _tries=0;
+async function boot(){
+  if(_booted) return;
+  let d;
+  try{ d = await api().get_init(); }
+  catch(e){
+    if(_tries++ < 100){ setTimeout(boot, 80); return; }
+    logLine('[初始化错误] '+(e&&e.message?e.message:e)); return;
+  }
+  _booted=true;
+  try{
+    S.providers=d.providers; S.keyless=d.keyless_providers;
+    const sel=$('f-provider'); sel.innerHTML=d.providers.map(p=>`<option>${p}</option>`).join('');
+    sel.value=d.provider;
+    $('f-source').value=d.source||''; $('f-subject').value=d.subject||'';
+    $('f-note').value=d.note||''; $('f-envpath').textContent='密钥仅保存在本机：'+d.env_path;
+    setKey(d.has_key); $('st-search').textContent=d.search_status;
+    applyData(d);
+    if(d.source){ $('settings').classList.add('collapsed'); }   // 已配置则默认收起
+    (d.warnings||[]).forEach(w=>logLine('  ! '+w));
+    if(!window._pollTimer) window._pollTimer=setInterval(drainEvents, 150);  // 启动事件轮询
+  }catch(e){ logLine('[渲染错误] '+(e&&e.message?e.message:e)); }
+}
+window.addEventListener('pywebviewready', boot, {once:true});
+boot();
+window.onerror=function(msg,src,ln){ try{ logLine('[JS错误] '+msg+' @'+ln); }catch(_){} };
+
+function applyData(d){
+  S.chapters=d.chapters||[]; S.hasOutput=!!d.has_output; S.checked.clear(); S.sel=null;
+  $('st-subject').textContent=d.subject_label||'—';
+  $('st-n').textContent=d.n_chapters||0; $('st-done').textContent=d.n_done||0;
+  renderTable(); setReaderHint(); updateActions();
+}
+function setKey(ok){ S.hasKey=ok;
+  $('st-keydot').className='dot '+(ok?'on':'off');
+  $('st-key').textContent='API Key '+(ok?'已设置':'未设置'); updateActions(); }
+
+/* ---------- 自绘标题栏：窗口控制 ---------- */
+async function winMin(){ try{ await api().win_minimize(); }catch(e){} }
+async function winClose(){ try{ await api().win_close(); }catch(e){} }
+async function winMax(){
+  try{ const r=await api().win_toggle_max();
+       const b=$('tb-max'); if(b) b.classList.toggle('is-max', !!(r&&r.maximized)); }catch(e){}
+}
+
+/* ---------- 折叠 ---------- */
+function toggleSettings(){ $('settings').classList.toggle('collapsed'); }
+
+/* ---------- 表格 ---------- */
+function renderTable(){
+  const tb=$('tbody');
+  if(!S.chapters.length){ tb.innerHTML='<div class="empty">尚未审计：请先点『审计资料 / 刷新映射』</div>'; return; }
+  tb.innerHTML = S.chapters.map((c,i)=>{
+    const st = c.status==='done'?'<span class="st-done">● 已生成</span>'
+             : c.status==='partial'?'<span class="st-part">▲ 截断</span>'
+             : '<span class="st-none">未生成</span>';
+    return `<div class="trow" data-i="${i}" onclick="selectRow(${i})">
+      <span style="text-align:center"><input type="checkbox" class="cbx" data-i="${i}"
+        onclick="event.stopPropagation();toggleCheck(${i},this.checked)"></span>
+      <span class="c">${st}</span><span class="c num">${esc(c.index)}</span>
+      <span class="c" title="${esc(c.title)}">${esc(c.title)}</span>
+      <span class="c src" title="${esc(c.src)}">${esc(c.src)}</span>
+      <span class="c oc">${c.outline_len}</span></div>`;
+  }).join('');
+}
+function selectRow(i){
+  S.sel=i;
+  document.querySelectorAll('.trow').forEach(r=>r.classList.toggle('sel', +r.dataset.i===i));
+  loadDetail(i);
+}
+function toggleCheck(i,on){ if(on)S.checked.add(i); else S.checked.delete(i); }
+function selectAll(on){
+  S.checked.clear(); if(on)S.chapters.forEach((_,i)=>S.checked.add(i));
+  document.querySelectorAll('#tbody .cbx').forEach(cb=>cb.checked=on);
+}
+
+/* ---------- 详情/阅读区 ---------- */
+async function loadDetail(i){
+  const d = await api().get_detail(S.chapters[i].index);
+  if(!d){return;}
+  const tag = d.status==='done'?'<span class="tag ok">已生成</span>'
+            : d.status==='partial'?'<span class="tag part">截断残稿</span>'
+            : '<span class="tag none">未生成</span>';
+  let h = `<div style="font-size:16px;font-weight:700;color:var(--ink);margin-bottom:2px">第 ${esc(d.index)} 章 · ${esc(d.title)}</div>`;
+  h += `<h4>素材文件</h4>` + d.sources.map(s=>`· ${esc(s)}`).join('<br>');
+  h += `<h4>大纲摘录（${d.outline_len} 字）</h4><div class="excerpt">${esc(d.outline_excerpt)||'（无）'}</div>`;
+  h += `<h4>输出状态</h4>${tag} &nbsp; 〔补/网核〕条目：约 ${d.n_sup}`;
+  h += `<h4>提示词</h4><span class="muted">${esc(d.prompt_path)}</span>`;
+  if(d.note){ h += `<h4>审计备注</h4>${esc(d.note)}`; }
+  $('reader').innerHTML = h;
+}
+function setReaderHint(){ $('reader').innerHTML =
+  '<div class="hintbox">点选左侧某一章，<br>这里会显示它的素材来源、<br>大纲摘录、输出状态与待核情况。</div>'; }
+
+/* ---------- 偏好 / 文件夹 / 密钥 ---------- */
+let prefsDirty=false;
+function dirtyPrefs(){ prefsDirty=true; }
+async function savePrefs(toastIt){
+  const r = await api().save_prefs($('f-source').value, $('f-subject').value.trim(),
+    $('f-note').value.trim(), $('f-provider').value);
+  prefsDirty=false; $('st-search').textContent=r.search_status;
+  if(toastIt) toast('设置已保存','ok');
+}
+async function chooseSource(){
+  const r = await api().choose_source();
+  if(!r.chosen) return;
+  $('f-source').value=r.source; applyData(r); toast('已选择资料文件夹','ok');
+}
+async function onProviderChange(){
+  const r = await api().get_search_status($('f-provider').value);
+  $('st-search').textContent=r.status; savePrefs(false);
+}
+function askKey(){ $('key-title').textContent='DeepSeek API Key';
+  $('key-desc').textContent='请输入 DeepSeek API Key（sk- 开头），仅保存在本地 .env。';
+  $('key-input').value=''; show('m-key'); setTimeout(()=>$('key-input').focus(),60); }
+async function submitKey(){
+  const k=$('key-input').value.trim(); if(!k){hide('m-key');return;}
+  const r=await api().set_key(k); hide('m-key'); setKey(r.has_key);
+  if(r.has_key) toast('API Key 已保存','ok');
+}
+async function setSearchKey(){
+  const p=$('f-provider').value; const r=await api().search_key_info(p);
+  if(r.keyless){ toast(r.msg); return; }
+  $('skey-title').textContent=p+' 检索 Key'; $('skey-desc').textContent='请输入 '+p+' 的 API Key（保存在本地 .env）。';
+  $('skey-input').value=''; show('m-skey'); setTimeout(()=>$('skey-input').focus(),60);
+}
+async function submitSearchKey(){
+  const k=$('skey-input').value.trim(); if(!k){hide('m-skey');return;}
+  const r=await api().set_search_key($('f-provider').value,k); hide('m-skey');
+  $('st-search').textContent=r.status; toast(r.msg,'ok');
+}
+async function checkShare(){
+  const r=await api().check_share_keys(); if(!r.chosen) return;
+  if(r.hits.length){ confirmBox('发现可能的密钥',
+    '以下文件可能含密钥，分享前请删除/清空：\n\n'+r.hits.slice(0,20).join('\n'), ()=>{});
+    $('cf-ok').textContent='我知道了'; }
+  else toast('未发现 .env 或 sk- 密钥，可以放心分享','ok');
+}
+async function openOutput(){
+  const r=await api().open_output(false);
+  if(r.no_source){ toast('请先选择资料文件夹','warn'); return; }
+  if(r.need_create){ confirmBox('还没有输出目录', r.msg+'\n现在创建吗？',
+    async()=>{ await api().open_output(true); }); $('cf-ok').textContent='创建并打开'; }
+}
+
+/* ---------- 运行：审计 / 生成 / 核对 ---------- */
+function selectedIndices(){ return [...S.checked].sort((a,b)=>a-b).map(i=>S.chapters[i].index); }
+function preOk(r){
+  if(r.need_key){ askKey(); return false; }
+  if(r.need_source){ toast('请先选择资料文件夹','warn'); return false; }
+  if(r.need_search_key){ toast(r.msg||'该来源需要先设置检索 Key','warn'); return false; }
+  if(r.none_selected){ toast('请在表格里勾选要生成的章节（可“全选”）','warn'); return false; }
+  if(r.all_done){ toast('所有章节都已生成','ok'); return false; }
+  if(r.nothing){ toast(r.msg||'无可核对','warn'); return false; }
+  return r.started;
+}
+async function runAudit(){ if(S.busy)return;
+  await savePrefs(false);
+  const r=await api().run_audit($('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
+  preOk(r);
+}
+async function runGenerate(){ if(S.busy)return;
+  await savePrefs(false);
+  const r=await api().run_generate(selectedIndices(),$('f-overwrite').checked,
+    $('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
+  preOk(r);
+}
+async function runGeneratePending(){ if(S.busy)return;
+  await savePrefs(false);
+  const r=await api().run_generate_pending($('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
+  preOk(r);
+}
+async function runVerify(){ if(S.busy)return;
+  await savePrefs(false);
+  const r=await api().run_verify(selectedIndices(),$('f-provider').value,
+    $('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
+  preOk(r);
+}
+async function showGaps(){
+  const r=await api().scan_gaps();
+  const keys=Object.keys(r.gaps||{});
+  if(!keys.length){ toast('未发现 〔补〕 补充项，或尚无已生成章节','ok'); return; }
+  let total=0; keys.forEach(k=>total+=r.gaps[k].length);
+  let h=`<div style="color:var(--sub);margin-bottom:6px">共 ${keys.length} 章有 ${total} 处补充内容：</div>`;
+  keys.forEach(k=>{ h+=`<div class="gh">■ ${esc(k)}</div>`;
+    r.gaps[k].forEach(it=>h+=`<div class="gi">- ${esc(it)}</div>`); });
+  $('gaps-body').innerHTML=h; show('m-gaps');
+}
+
+/* ---------- 后端推送 ---------- */
+const RT = {
+  onLog(text){ logLine(text); },
+  onPhase(t){ $('phase').textContent=t; },
+  onProgress(i,total,title){ const b=$('bar'); b.classList.remove('indet');
+    $('bari').style.width=(total?Math.round(i/total*100):0)+'%';
+    $('phase').textContent=`进度 ${i}/${total}：${title}`; },
+  onBusy(on){ setBusy(on); },
+  onDone(p){ setBusy(false);
+    if(p.chapters!==undefined) applyData(p);
+    if(p.ok===false && p.err){ toast('出错：'+p.err,'err'); logLine('[错误] '+p.err); }
+    else if(p.ok){ toast('✓ 完成','ok'); }
+    if(p.gaps && Object.keys(p.gaps).length){ // 生成后弹待核
+      let h='';let total=0;const keys=Object.keys(p.gaps);keys.forEach(k=>total+=p.gaps[k].length);
+      h=`<div style="color:var(--sub);margin-bottom:6px">共 ${keys.length} 章有 ${total} 处补充内容：</div>`;
+      keys.forEach(k=>{h+=`<div class="gh">■ ${esc(k)}</div>`;p.gaps[k].forEach(it=>h+=`<div class="gi">- ${esc(it)}</div>`);});
+      $('gaps-body').innerHTML=h; show('m-gaps');
+    } else if(p.kind==='generate'){ logLine('本次无 〔补〕 补充项（课件已覆盖大纲要求）。'); }
+  }
+};
+
+/* 前端轮询：把后端缓冲的事件取走并分发（替代易卡死的 Python->JS 推送）*/
+let _draining=false;
+async function drainEvents(){
+  if(_draining) return; _draining=true;
+  try{
+    const evs = await api().drain();
+    if(evs && evs.length) for(const e of evs){
+      if(e.t==='log') logLine(e.v);
+      else if(e.t==='phase') RT.onPhase(e.v);
+      else if(e.t==='progress') RT.onProgress(e.i,e.total,e.title);
+      else if(e.t==='busy') RT.onBusy(e.v);
+      else if(e.t==='done') RT.onDone(e.payload);
+    }
+  }catch(_){}
+  _draining=false;
+}
+function logLine(s){ const lg=$('log'); const cls=lineClass(s);
+  const div=document.createElement('div'); if(cls)div.className=cls; div.textContent=s;
+  lg.appendChild(div); lg.scrollTop=lg.scrollHeight; }
+function lineClass(s){ const t=s.trim();
+  if(!t)return''; if(t.startsWith('==='))return'l-head';
+  if(t.startsWith('[错误]')||/Traceback|Error/.test(t))return'l-err';
+  if(/⚠|失败|截断|告警/.test(t)||t.startsWith('!'))return'l-warn';
+  if(/✓|已保存|完成/.test(t))return'l-ok';
+  if(/^[·•]/.test(t)||/out_tokens/.test(t)||/^\[(审计|构建|生成|核对)\]/.test(t))return'l-muted';
+  return''; }
+
+/* ---------- busy / 启用态 ---------- */
+function setBusy(on){ S.busy=on;
+  const pr=$('progress'); const bar=$('bar');
+  if(on){ pr.classList.add('show'); bar.classList.add('indet'); $('bari').style.width='';
+    $('phase').textContent='运行中…（请勿关闭窗口）'; }
+  else{ pr.classList.remove('show'); bar.classList.remove('indet'); $('phase').textContent=''; }
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=on);
+  if(!on) updateActions();
+}
+function updateActions(){
+  if(S.busy) return;
+  const audited=S.chapters.length>0;
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+  $('b-audit').disabled = !(S.hasKey && !!$('f-source').value);
+  document.querySelectorAll('.na').forEach(b=>b.disabled=!(audited && S.hasKey));
+  document.querySelectorAll('.no').forEach(b=>b.disabled=!S.hasOutput);
+}
+</script>
+</body>
+</html>

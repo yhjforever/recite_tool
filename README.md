@@ -6,6 +6,13 @@
 
 如果你是第一次用，**不需要安装 GitHub，不需要看代码，也不要点绿色 `Code` 按钮**。
 
+### 直接点这里下载
+
+- **Windows 10 / 11：[下载 Windows 版 recite_tool_windows.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.0.0/recite_tool_windows.zip)**
+- **macOS：[下载 macOS 版 recite_tool_macos.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.0.0/recite_tool_macos.zip)**
+
+下载完毕后，先右键压缩包选“解压”，再按下面的对应步骤打开。
+
 请按下面三步走：
 
 1. 打开下载页：<https://github.com/yhjforever/recite_tool/releases/latest>

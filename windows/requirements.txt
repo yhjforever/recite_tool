@@ -5,6 +5,9 @@ PyYAML>=6.0
 python-pptx>=0.6.21
 # 可选：联网核对默认用 DuckDuckGo（provider=ddg 时需要；tavily/serper/bing 不需要此包）
 ddgs>=6.0
-# 现代化界面：优先 CustomTkinter（圆角卡片），缺失则回退 ttkbootstrap，再缺回退内置 clam
+# 界面三级回退：① Web 版（最美观、动画最顺）pywebview + WebView2（Win11 预装运行时）
+#              ② CustomTkinter 圆角卡片  ③ ttkbootstrap，再缺回退内置 clam
+pywebview>=5.0
+pythonnet>=3.0
 customtkinter>=5.2
 ttkbootstrap>=1.10

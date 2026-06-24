@@ -3,7 +3,7 @@
 cd "$(dirname "$0")" || exit 1
 
 DL="https://www.python.org/downloads/macos/"
-req_ok() { "$1" -c "import yaml, requests, pypdf" >/dev/null 2>&1; }
+req_ok() { "$1" -c "import yaml, requests, pypdf, webview" >/dev/null 2>&1; }
 tk_ok()  { "$1" -c "import tkinter" >/dev/null 2>&1; }
 alert()  { osascript -e "display dialog \"$1\" buttons {\"好\"} default button 1 with icon $2 with title \"背诵稿生成器\"" >/dev/null 2>&1; }
 

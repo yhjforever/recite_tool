@@ -1,6 +1,7 @@
 """把工具打包成 macOS 应用（.app，免对方装 Python）。用法： python3 build_app.py
 产物： dist/背诵稿生成器.app（及便于分发的 .zip）—— 不含任何 API Key，
 每个人首次运行填自己的 Key。请在 macOS 上运行本脚本。"""
+import os
 import sys
 import shutil
 import subprocess
@@ -50,6 +51,16 @@ def main():
         print("检测到 python-pptx：.app 将支持 .pptx 原生课件。")
     except ImportError:
         print("未装 python-pptx：.app 仅支持 PDF/txt/md（如需 pptx 请先 pip install python-pptx）。")
+
+    web = HERE / "recite" / "web" / "index.html"
+    if web.exists():
+        args += ["--add-data", f"{web}{os.pathsep}recite/web"]
+    try:
+        import webview  # noqa: F401
+        args += ["--collect-all", "webview"]
+        print("检测到 pywebview：.app 将优先使用 Web 版界面。")
+    except ImportError:
+        print("未装 pywebview：.app 退回 CustomTkinter 界面。")
 
     icns = HERE / "icon.icns"
     if icns.exists():

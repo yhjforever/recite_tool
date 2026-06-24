@@ -92,7 +92,7 @@ recite_tool/
 ## 安装
 
 ```powershell
-cd C:\path\to\recite_tool\windows
+cd E:\codex_project\recite_tool
 pip install -r requirements.txt
 ```
 > `.pptx` 原生课件需 `python-pptx`（已在 requirements）；只用 PDF 可不装。
@@ -129,7 +129,7 @@ python -m recite verify --chapters 8
 # 查看进度 / 覆盖重做 / 临时换学科文件夹
 python -m recite status
 python -m recite generate --force
-python -m recite run --source "C:/path/to/病理生理学" --subject 病理生理学
+python -m recite run --source "E:/codex_project/病理生理学" --subject 病理生理学
 ```
 
 **换学科**（如病理生理学）：把该课所有 PPT/课本 + 一份大纲放进一个文件夹 →

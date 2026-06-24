@@ -1,11 +1,11 @@
 """图形界面（Tkinter，无需终端）：首启询问并保存 API Key；选择资料文件夹；
 填写学科与课程说明；审计映射；按章勾选生成 Markdown 背诵稿。"""
 import os
+import sys
 import json
 import queue
 import threading
 import subprocess
-import sys
 from pathlib import Path
 
 import tkinter as tk
@@ -1046,14 +1046,23 @@ class App:
 
 
 def launch(config_path=None):
-    # 优先用 CustomTkinter 圆角现代界面；缺失则回退到 ttk(bootstrap/clam) 版
+    # 三级回退：① Web 版（pywebview + WebView2，最美观、动画最顺）
+    #          ② CustomTkinter 圆角版  ③ ttk(bootstrap/clam) 版
+    import sys
+    try:
+        from .gui_web import launch as launch_web
+        launch_web(config_path)
+        return
+    except Exception as e:
+        sys.stderr.write(f"[gui] Web 版不可用，回退 CustomTkinter：{e}\n")
     try:
         import customtkinter  # noqa
-    except Exception:
-        App(config_path).root.mainloop()
+        from .gui_ctk import launch as launch_ctk
+        launch_ctk(config_path)
         return
-    from .gui_ctk import launch as launch_ctk
-    launch_ctk(config_path)
+    except Exception as e:
+        sys.stderr.write(f"[gui] CustomTkinter 不可用，回退 ttk：{e}\n")
+    App(config_path).root.mainloop()
 
 
 if __name__ == "__main__":

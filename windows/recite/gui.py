@@ -1044,14 +1044,23 @@ class App:
 
 
 def launch(config_path=None):
-    # 优先用 CustomTkinter 圆角现代界面；缺失则回退到 ttk(bootstrap/clam) 版
+    # 三级回退：① Web 版（pywebview + WebView2，最美观、动画最顺）
+    #          ② CustomTkinter 圆角版  ③ ttk(bootstrap/clam) 版
+    import sys
+    try:
+        from .gui_web import launch as launch_web
+        launch_web(config_path)
+        return
+    except Exception as e:
+        sys.stderr.write(f"[gui] Web 版不可用，回退 CustomTkinter：{e}\n")
     try:
         import customtkinter  # noqa
-    except Exception:
-        App(config_path).root.mainloop()
+        from .gui_ctk import launch as launch_ctk
+        launch_ctk(config_path)
         return
-    from .gui_ctk import launch as launch_ctk
-    launch_ctk(config_path)
+    except Exception as e:
+        sys.stderr.write(f"[gui] CustomTkinter 不可用，回退 ttk：{e}\n")
+    App(config_path).root.mainloop()
 
 
 if __name__ == "__main__":

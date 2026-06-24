@@ -36,7 +36,7 @@ if [ ! -d ".venv" ]; then
 fi
 
 # 4) 安装依赖
-echo "· 正在安装依赖（pypdf / requests / PyYAML / python-pptx / ddgs）…"
+echo "· 正在安装依赖（包括新 Web 界面）…"
 ./.venv/bin/python -m pip install --upgrade pip >/dev/null 2>&1
 if ! ./.venv/bin/python -m pip install -r requirements.txt; then
   echo "✗ 依赖安装失败，请检查网络后重试。"
