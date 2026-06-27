@@ -5,7 +5,7 @@ import time
 
 from .deepseek import DeepSeek
 from .websearch import search
-from .util import read_json, chapter_stem, parse_json_loose
+from .util import read_json, chapter_stem, parse_json_loose, read_text_tolerant
 
 SECTION_MARK = "## 联网核对补充（真实来源）"
 
@@ -87,7 +87,7 @@ def run_verify(cfg, only: str = "", force: bool = False, progress_cb=None) -> No
         if not md_path.exists():
             print(f"  · 跳过（未生成）: {stem}")
             continue
-        md = md_path.read_text(encoding="utf-8")
+        md = read_text_tolerant(md_path)
         points = extract_pending(md)
         if not points:
             print(f"  · {ch.get('title')}: 无待核项，跳过")

@@ -1,7 +1,6 @@
 """CustomTkinter 版图形界面（圆角卡片 + 现代列表 + 深色终端日志）。
 后端逻辑与 ttk 版一致；CustomTkinter 缺失时由 gui.launch() 回退到 ttk 版。"""
 import os
-import sys
 import queue
 import threading
 import subprocess
@@ -280,7 +279,7 @@ class App:
                                           corner_radius=9, font=self.f, fg_color=SURFACE_SOFT,
                                           text_color=TEXT, button_color=ACCENT,
                                           button_hover_color=ACCENT_H, dropdown_fg_color=CARD,
-                                          values=["bing_cn", "pubmed", "ddg", "tavily", "serper", "bing"])
+                                          values=["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg", "tavily", "serper", "bing"])
         self.cmb_prov.pack(side="left")
         self._ghost(r2, "设置检索 Key", self._set_search_key, 116).pack(side="left", padx=8)
 
@@ -668,6 +667,7 @@ class App:
         try:
             os.startfile(str(out))
         except AttributeError:
+            import sys
             opener = "open" if sys.platform == "darwin" else "xdg-open"
             subprocess.Popen([opener, str(out)])
 

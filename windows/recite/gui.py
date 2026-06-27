@@ -20,12 +20,15 @@ from .audit import run_audit
 from .build import run_build
 from .generate import run_generate
 from .verify import run_verify
-from .util import read_json, chapter_stem
+from .util import read_json, chapter_stem, read_text_tolerant
 
 SEARCH_ENV = {"tavily": "TAVILY_API_KEY", "serper": "SERPER_API_KEY", "bing": "BING_API_KEY"}
 
 ENV_PATH = ROOT / ".env"
 STATE_PATH = ROOT / "gui_state.json"
+
+APP_TITLE = "背诵稿生成器 · recite_tool"          # 须与 gui_web.TITLE 完全一致（单实例靠它找窗口）
+_MUTEX_NAME = "recite_tool_single_instance_mutex_v1"
 
 
 # ---------------- 持久化：API Key 与界面偏好 ----------------
@@ -34,7 +37,7 @@ def read_env_key() -> str:
     if k:
         return k.strip()
     if ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        for line in read_text_tolerant(ENV_PATH).splitlines():
             key, sep, val = line.partition("=")
             if sep and key.strip() == "DEEPSEEK_API_KEY":   # 精确匹配，避免 _BACKUP 等误伤
                 return val.strip().strip('"').strip("'")
@@ -46,7 +49,7 @@ def write_env_kv(name: str, value: str) -> None:
     value = value.strip()
     lines, found = [], False
     if ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        for line in read_text_tolerant(ENV_PATH).splitlines():
             key, sep, _ = line.partition("=")
             if sep and key.strip() == name:
                 lines.append(f"{name}={value}")
@@ -66,7 +69,7 @@ def write_env_key(key: str) -> None:
 def load_state() -> dict:
     if STATE_PATH.exists():
         try:
-            return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            return json.loads(read_text_tolerant(STATE_PATH))
         except Exception:
             return {}
     return {}
@@ -119,7 +122,7 @@ class App:
         self._focused = None      # 详情面板当前展示的章节行
 
         self.root = tb.Window(themename="litera") if tb is not None else tk.Tk()
-        self.root.title("背诵稿生成器 · recite_tool")
+        self.root.title(APP_TITLE)
         self.root.minsize(960, 720)
         try:
             ico = ROOT / "icon.ico"
@@ -308,7 +311,7 @@ class App:
         self._inputs.append((ent_subj, "normal"))
         ttk.Label(r3, text="（留空自动判断）　联网核对来源：").pack(side="left")
         cmb = ttk.Combobox(r3, textvariable=self.var_provider, width=10, state="readonly",
-                           values=["bing_cn", "pubmed", "ddg", "tavily", "serper", "bing"])
+                           values=["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg", "tavily", "serper", "bing"])
         cmb.pack(side="left", padx=4)
         self._inputs.append((cmb, "readonly"))
         b = ttk.Button(r3, text="设置检索Key", command=self._set_search_key, **self._kw_sec)
@@ -1043,7 +1046,37 @@ class App:
         txt.config(state="disabled")
 
 
+def _acquire_single_instance() -> bool:
+    """Windows 命名互斥量：返回 True=本进程是唯一实例；False=已有实例在运行。
+    句柄故意不关闭（随进程存活即可）。任何异常一律放行（fail-open，绝不因此挡住启动）。"""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.CreateMutexW(None, False, _MUTEX_NAME)
+        return k32.GetLastError() != 183          # 183 = ERROR_ALREADY_EXISTS
+    except Exception:
+        return True
+
+
+def _focus_existing_window() -> None:
+    """已有实例在跑：把它的窗口还原并置前，避免用户以为“没反应”而反复双击开多个。"""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        hwnd = u.FindWindowW(None, APP_TITLE)
+        if hwnd:
+            u.ShowWindow(hwnd, 9)                 # SW_RESTORE
+            u.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
 def launch(config_path=None):
+    # 单实例守卫：避免重复双击开出多个同标题窗口——多实例下 gui_web 的 FindWindowW
+    # 会命中错窗口，导致最小化/关闭/最大化按钮作用到别的窗口，表现就像“无响应”。
+    if not _acquire_single_instance():
+        _focus_existing_window()
+        return
     # 三级回退：① Web 版（pywebview + WebView2，最美观、动画最顺）
     #          ② CustomTkinter 圆角版  ③ ttk(bootstrap/clam) 版
     import sys

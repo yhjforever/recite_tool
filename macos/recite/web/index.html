@@ -350,8 +350,11 @@ async function boot(){
   let d;
   try{ d = await api().get_init(); }
   catch(e){
-    if(_tries++ < 100){ setTimeout(boot, 80); return; }
-    logLine('[初始化错误] '+(e&&e.message?e.message:e)); return;
+    // 桥(window.pywebview.api)冷启动可能较慢：最多重试 ~30s（旧版 8s 在慢机/首启时不够，
+    // 会过早放弃并停在“API Key 未设置 + 空表格”的死状态）。pywebviewready 事件是兜底信号。
+    if(_tries++ < 300){ setTimeout(boot, 100); return; }
+    logLine('[初始化错误] 界面桥接超时，请关闭后重新打开本程序。'+(e&&e.message?(' ('+e.message+')'):''));
+    toast('启动异常：请关闭后重新打开','err'); return;
   }
   _booted=true;
   try{
@@ -364,7 +367,6 @@ async function boot(){
     applyData(d);
     if(d.source){ $('settings').classList.add('collapsed'); }   // 已配置则默认收起
     (d.warnings||[]).forEach(w=>logLine('  ! '+w));
-    if(!window._pollTimer) window._pollTimer=setInterval(drainEvents, 150);  // 启动事件轮询
   }catch(e){ logLine('[渲染错误] '+(e&&e.message?e.message:e)); }
 }
 window.addEventListener('pywebviewready', boot, {once:true});
@@ -503,24 +505,24 @@ function preOk(r){
 async function runAudit(){ if(S.busy)return;
   await savePrefs(false);
   const r=await api().run_audit($('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
-  preOk(r);
+  if (preOk(r)) startPoll();
 }
 async function runGenerate(){ if(S.busy)return;
   await savePrefs(false);
   const r=await api().run_generate(selectedIndices(),$('f-overwrite').checked,
     $('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
-  preOk(r);
+  if (preOk(r)) startPoll();
 }
 async function runGeneratePending(){ if(S.busy)return;
   await savePrefs(false);
   const r=await api().run_generate_pending($('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
-  preOk(r);
+  if (preOk(r)) startPoll();
 }
 async function runVerify(){ if(S.busy)return;
   await savePrefs(false);
   const r=await api().run_verify(selectedIndices(),$('f-provider').value,
     $('f-source').value,$('f-subject').value.trim(),$('f-note').value.trim());
-  preOk(r);
+  if (preOk(r)) startPoll();
 }
 async function showGaps(){
   const r=await api().scan_gaps();
@@ -556,23 +558,31 @@ const RT = {
 
 /* 前端轮询：把后端缓冲的事件取走并分发（替代易卡死的 Python->JS 推送）*/
 let _draining=false;
+/* 只在任务运行期间轮询；空闲不发任何 api 调用（避免 pywebview 内部 evaluate_js 递归/卡死）*/
+function startPoll(){ if(!window._pollTimer){ window._pollTimer=setInterval(drainEvents,200); drainEvents(); } }
+function stopPoll(){ if(window._pollTimer){ clearInterval(window._pollTimer); window._pollTimer=null; } }
 async function drainEvents(){
   if(_draining) return; _draining=true;
   try{
     const evs = await api().drain();
-    if(evs && evs.length) for(const e of evs){
-      if(e.t==='log') logLine(e.v);
-      else if(e.t==='phase') RT.onPhase(e.v);
-      else if(e.t==='progress') RT.onProgress(e.i,e.total,e.title);
-      else if(e.t==='busy') RT.onBusy(e.v);
-      else if(e.t==='done') RT.onDone(e.payload);
+    if(evs && evs.length){ let done=false;
+      for(const e of evs){
+        if(e.t==='log') logLine(e.v);
+        else if(e.t==='phase') RT.onPhase(e.v);
+        else if(e.t==='progress') RT.onProgress(e.i,e.total,e.title);
+        else if(e.t==='busy') RT.onBusy(e.v);
+        else if(e.t==='done'){ RT.onDone(e.payload); done=true; }
+      }
+      if(done) stopPoll();        // 任务结束 -> 停止轮询，回到零 api 流量的空闲态
     }
   }catch(_){}
   _draining=false;
 }
 function logLine(s){ const lg=$('log'); const cls=lineClass(s);
   const div=document.createElement('div'); if(cls)div.className=cls; div.textContent=s;
-  lg.appendChild(div); lg.scrollTop=lg.scrollHeight; }
+  lg.appendChild(div);
+  while(lg.childElementCount>500) lg.removeChild(lg.firstChild);   // 限高，避免长任务 DOM 无限膨胀
+  lg.scrollTop=lg.scrollHeight; }
 function lineClass(s){ const t=s.trim();
   if(!t)return''; if(t.startsWith('==='))return'l-head';
   if(t.startsWith('[错误]')||/Traceback|Error/.test(t))return'l-err';

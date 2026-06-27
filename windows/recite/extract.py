@@ -28,13 +28,16 @@ HEADING_RE = re.compile(
 )
 
 
-def _clean_lines(raw: str) -> list[str]:
+def _clean_lines(raw: str, keep_digit_lines: bool = False) -> list[str]:
     out = []
     for ln in raw.split("\n"):
         s = ln.strip()
         if not s:
             continue
-        if s.isdigit():                       # 纯页码
+        # 纯数字行通常是页码，删之；但大纲是表格，PDF 抽取会把标题里的数字
+        # （如 "Chapter30-\n35"、章次范围）拆成独立数字行，删了会破坏标题匹配，
+        # 故抽取大纲时 keep_digit_lines=True 保留。
+        if not keep_digit_lines and s.isdigit():
             continue
         if s in NOISE_EQUAL:
             continue
@@ -109,13 +112,19 @@ def _cache_key(path: Path) -> str:
     return f"{path.stem}.{h.hexdigest()[:12]}.txt"
 
 
-def extract_text(path: Path, cache_dir: Path, force: bool = False) -> str:
-    """抽取并清洗文本，结果按内容 hash 缓存到 cache_dir。"""
+def extract_text(path: Path, cache_dir: Path, force: bool = False,
+                 keep_digit_lines: bool = False) -> str:
+    """抽取并清洗文本，结果按内容 hash 缓存到 cache_dir。
+    keep_digit_lines=True 时保留纯数字行（用于大纲表格，避免标题数字被当页码删掉），
+    并用独立缓存文件名，避免两种清洗模式互相污染。"""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / _cache_key(path)
+    name = _cache_key(path)
+    if keep_digit_lines:
+        name = name[:-4] + ".kd.txt"
+    cache_file = cache_dir / name
     if cache_file.exists() and not force:
         return cache_file.read_text(encoding="utf-8")
-    text = "\n".join(_clean_lines(read_raw(path)))
+    text = "\n".join(_clean_lines(read_raw(path), keep_digit_lines))
     cache_file.write_text(text, encoding="utf-8")
     return text
 

@@ -100,13 +100,35 @@ def slice_book(text: str, headings: list[tuple], max_chars: int = 0) -> dict:
     return res
 
 
+def _heading_candidates(ch: dict) -> list[str]:
+    """每章的定位候选，按可靠度排序：完整 outline_heading → 去掉行政前缀的主题名 → 章标题。
+    行政前缀如『病原生物学（上），第30-35章 Chapter30-35』在表格抽取里易被数字行破坏，
+    而主题名（疱疹病毒/… / Herpes viruses/…）独特且不含数字，作兜底更稳。"""
+    cands = []
+    h = (ch.get("outline_heading") or "").strip()
+    if h:
+        cands.append(h)
+        # 去掉 “……第X章/第X-Y章 ChapterX-Y” 这段行政前缀，留下主题名
+        tail = re.sub(r"^.*?(?:第[\d一二三四五六七八九十,，\-－、\s]+[章节]\s*)"
+                      r"(?:Chapter\s*[\d\-,\s]+)?", "", h, count=1).strip()
+        if tail and tail != h:
+            cands.append(tail)
+    t = (ch.get("title") or "").strip()
+    if t and t not in cands:
+        cands.append(t)
+    return cands
+
+
 def slice_outline(outline_text: str, chapters: list[dict]) -> list[str]:
     """为每个 chapter 计算 outline_excerpt（就地写回），并返回未定位到的章标题列表。"""
     positions = []
     cursor = 0
     for ch in chapters:
-        heading = ch.get("outline_heading") or ch.get("title", "")
-        pos = _find_heading(outline_text, heading, cursor)
+        pos = -1
+        for cand in _heading_candidates(ch):       # 多候选：完整标题失败就退到主题名/章名
+            pos = _find_heading(outline_text, cand, cursor)
+            if pos >= 0:
+                break
         positions.append(pos)
         if pos >= 0:
             cursor = pos + 1

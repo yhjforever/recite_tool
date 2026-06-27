@@ -6,7 +6,7 @@ from .deepseek import DeepSeek
 from .prompts import render_system, render_chapter
 from .extract import list_source_files
 from .build import assemble_source_text
-from .util import read_json, chapter_stem
+from .util import read_json, chapter_stem, read_text_tolerant
 
 
 def _select(chapters, only):
@@ -27,7 +27,7 @@ def _user_prompt(cfg, ch, all_chapters, sources) -> str:
     stem = chapter_stem(ch.get("index"), ch.get("title", ""))
     f = cfg.prompts_dir / f"{stem}.txt"
     if f.exists():
-        return f.read_text(encoding="utf-8")
+        return read_text_tolerant(f)        # 尊重用户手改；手改若存成 ANSI/GBK 也不致崩
     label, source_text = assemble_source_text(cfg, ch, all_chapters, sources)
     return render_chapter(ch.get("title", ""), ch.get("hours", ""), ch.get("note", ""),
                           ch.get("outline_excerpt", ""), label, source_text,
@@ -47,7 +47,7 @@ def run_generate(cfg, only: str = "", force: bool = False, progress_cb=None) -> 
     _, sources = list_source_files(cfg)
 
     sys_path = cfg.prompts_dir / "00_系统提示词.txt"
-    system = sys_path.read_text(encoding="utf-8") if sys_path.exists() \
+    system = read_text_tolerant(sys_path) if sys_path.exists() \
         else render_system(subject, getattr(cfg, "subject_note", ""))
 
     ds = DeepSeek(cfg)

@@ -47,6 +47,14 @@ class DeepSeek:
                     print(f"    · API {resp.status_code}，{wait:.0f}s 后重试 ({attempt}/{self.cfg.max_retries})")
                     time.sleep(wait)
                     continue
+                # 鉴权 / 计费类错误：重试无用，给出可操作的中文提示（用户最常见的“apikey 错误”）
+                if resp.status_code in (401, 403):
+                    raise RuntimeError(
+                        f"DeepSeek API Key 无效或无权限（HTTP {resp.status_code}）："
+                        "请点界面『设置 / 修改密钥』填入正确的、以 sk- 开头的 Key。")
+                if resp.status_code == 402:
+                    raise RuntimeError(
+                        "DeepSeek 账户余额不足（HTTP 402）：请到 platform.deepseek.com 充值后重试。")
                 # 其它错误：直接抛
                 raise RuntimeError(f"DeepSeek API 错误 HTTP {resp.status_code}: {resp.text[:500]}")
             except (requests.Timeout, requests.ConnectionError) as e:

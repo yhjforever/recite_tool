@@ -25,6 +25,10 @@ CANVAS = "#FAF6EF"   # 纸色（与前端一致，用于窗口底色与标题栏
 INK = "#33302A"      # 墨色
 TITLE = "背诵稿生成器 · recite_tool"
 
+PROVIDERS = ["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg",
+             "tavily", "serper", "bing", "bing_cn"]
+KEYLESS_PROVIDERS = ["authoritative", "bing_cn", "so360", "sogou", "wikipedia", "pubmed", "ddg"]
+
 
 def _html_path():
     here = Path(__file__).resolve().parent
@@ -226,6 +230,24 @@ class Api:
 
     # ---------- 初始化 / 偏好 ----------
     def get_init(self):
+        # 绝不让 get_init 抛异常：它是前端 boot() 唯一的启动调用。一旦抛错，
+        # boot() 会反复重试直到放弃，界面停在“API Key 未设置 + 空表格 + 按钮禁用”
+        # 的死状态——既像“无响应”又像“apikey 错误”。失败时返回安全默认值兜底。
+        try:
+            return self._build_init()
+        except Exception:
+            try:
+                self._log("[初始化异常] " + traceback.format_exc())
+            except Exception:
+                pass
+            return {"source": "", "subject": "", "note": "", "provider": "bing_cn",
+                    "has_key": False, "env_path": str(ENV_PATH),
+                    "providers": list(PROVIDERS), "keyless_providers": list(KEYLESS_PROVIDERS),
+                    "search_status": self._search_status("bing_cn"),
+                    "chapters": [], "subject_label": "—", "n_chapters": 0,
+                    "n_done": 0, "has_output": False, "warnings": []}
+
+    def _build_init(self):
         st = load_state()
         cfg_src = ""
         try:
@@ -240,8 +262,7 @@ class Api:
         self.provider = st.get("search_provider", "bing_cn") or "bing_cn"
         d = {"source": self.source, "subject": self.subject, "note": self.note,
              "provider": self.provider, "has_key": bool(read_env_key()), "env_path": str(ENV_PATH),
-             "providers": ["bing_cn", "pubmed", "ddg", "tavily", "serper", "bing"],
-             "keyless_providers": ["bing_cn", "pubmed", "ddg"],
+             "providers": list(PROVIDERS), "keyless_providers": list(KEYLESS_PROVIDERS),
              "search_status": self._search_status(self.provider)}
         d.update(self._refresh_payload(include_warnings=True))
         return d
@@ -315,15 +336,24 @@ class Api:
         return {"ok": True}
 
     # ---------- 自绘标题栏：窗口控制 ----------
+    # js_api 跑在工作线程；用 self.window.minimize()/destroy() 会从工作线程访问 WebView2
+    # 控件（CoreWebView2 only on UI thread）→ COM 异常/递归 → 未响应。
+    # 改用 PostMessage：消息进窗口队列、由 UI 线程处理，零跨线程访问，稳。
+    def _hwnd(self):
+        import ctypes
+        return ctypes.windll.user32.FindWindowW(None, TITLE)
+
     def win_minimize(self):
         try:
-            self.window.minimize()
+            import ctypes
+            ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0112, 0xF020, 0)  # WM_SYSCOMMAND/SC_MINIMIZE
         except Exception:
             pass
 
     def win_close(self):
         try:
-            self.window.destroy()
+            import ctypes
+            ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0010, 0, 0)        # WM_CLOSE
         except Exception:
             pass
 
@@ -357,11 +387,7 @@ class Api:
                     u.SetWindowPos(hwnd, 0, x, y, ww, hh, SWP_NOZORDER)
                 self._max = False
         except Exception:
-            try:                                   # 兜底：系统 maximize/restore
-                (self.window.restore if self._max else self.window.maximize)()
-                self._max = not self._max
-            except Exception:
-                pass
+            pass                                   # 找不到 hwnd 就不动作，绝不从工作线程碰 self.window
         return {"maximized": self._max}
 
     def check_share_keys(self):

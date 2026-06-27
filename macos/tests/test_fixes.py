@@ -147,6 +147,66 @@ def test_generate_writes_partial_not_md_on_truncation():
         assert not md.exists(), "截断时不应写正式 .md"
 
 
+# ---------- 打开卡死 / apikey 误报根因：.env 带 BOM 或 GBK 不应致命 ----------
+def test_read_text_tolerant_bom_and_gbk():
+    from recite.util import read_text_tolerant
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        f1 = d / "bom.env"
+        f1.write_bytes("﻿DEEPSEEK_API_KEY=sk-bom\n".encode("utf-8"))   # UTF-8 BOM
+        assert read_text_tolerant(f1).splitlines()[0] == "DEEPSEEK_API_KEY=sk-bom"
+        f2 = d / "gbk.env"
+        f2.write_bytes("# 我的密钥\nDEEPSEEK_API_KEY=sk-gbk\n".encode("gb18030"))  # 中文注释 ANSI/GBK
+        assert "DEEPSEEK_API_KEY=sk-gbk" in read_text_tolerant(f2)            # 不抛 UnicodeDecodeError
+
+
+def test_read_env_key_survives_bom_and_gbk():
+    import recite.gui as g
+    old = g.ENV_PATH
+    with tempfile.TemporaryDirectory() as d:
+        env = Path(d) / ".env"
+        try:
+            env.write_bytes("﻿DEEPSEEK_API_KEY=sk-bomkey\n".encode("utf-8"))   # BOM
+            g.ENV_PATH = env
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            assert g.read_env_key() == "sk-bomkey", "BOM 让首行键名带 \\ufeff，旧逻辑读出空 key"
+            env.write_bytes("# 备注\nDEEPSEEK_API_KEY=sk-gbkkey\n".encode("gb18030"))  # GBK 注释
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            assert g.read_env_key() == "sk-gbkkey", "GBK 字节旧逻辑抛 UnicodeDecodeError"
+        finally:
+            g.ENV_PATH = old
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+
+
+# ---------- apikey 错误：401/403/402 给出可操作中文提示，而非晦涩 HTTP 文本 ----------
+def test_deepseek_friendly_auth_and_billing_errors():
+    import recite.deepseek as dsmod
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = "server body"
+
+        def json(self):
+            return {}
+
+    ds = dsmod.DeepSeek(_Cfg())                       # _Cfg: max_retries=1, retry_backoff=0
+    orig = dsmod.requests.post
+    try:
+        dsmod.requests.post = lambda *a, **k: _Resp(401)
+        try:
+            ds.chat([{"role": "user", "content": "hi"}]); assert False, "401 应抛错"
+        except RuntimeError as e:
+            assert "Key" in str(e) and "401" in str(e), str(e)
+        dsmod.requests.post = lambda *a, **k: _Resp(402)
+        try:
+            ds.chat([{"role": "user", "content": "hi"}]); assert False, "402 应抛错"
+        except RuntimeError as e:
+            assert "余额" in str(e), str(e)
+    finally:
+        dsmod.requests.post = orig
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

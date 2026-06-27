@@ -6,6 +6,21 @@ from pathlib import Path
 _BAD = re.compile(r'[\\/:*?"<>|]')
 
 
+def read_text_tolerant(path: Path) -> str:
+    """读取文本，按 Windows 常见编码依次尝试，绝不因 BOM / 编码抛异常。
+    用于 .env / config.yaml / gui_state.json 等启动关键小文件：
+    某些编辑器把它们存成 UTF-8(BOM) 或 ANSI/GBK 时，原来的 read_text('utf-8')
+    会读出空键（BOM 让首行键名带 \\ufeff）或直接抛 UnicodeDecodeError，
+    导致 get_init 失败、界面卡死并误报“API Key 未设置”。"""
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "gb18030", "utf-16"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def safe_name(s: str) -> str:
     return _BAD.sub("", str(s)).replace(" ", "").strip() or "untitled"
 

@@ -15,7 +15,8 @@ def run_audit(cfg, force: bool = False) -> dict:
     print(f"[审计] 大纲: {outline_path.name}")
     print(f"[审计] 课件: {len(sources)} 个；正在抽取文本与指纹 …")
 
-    outline_text = extract_text(outline_path, cfg.cache_dir, force=force)
+    # 大纲多为表格，抽取时保留数字行，否则标题里的章次数字会被当页码删掉、导致切片定位失败
+    outline_text = extract_text(outline_path, cfg.cache_dir, force=force, keep_digit_lines=True)
     fps = [fingerprint(f, cfg.cache_dir) for f in sources]
 
     print("[审计] 调用 DeepSeek 做章节→文件映射 …")

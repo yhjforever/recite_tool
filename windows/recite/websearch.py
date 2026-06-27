@@ -10,6 +10,7 @@ import requests
 UA = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 
@@ -93,19 +94,151 @@ def _parse_bing(html: str, n: int) -> list[dict]:
 
 
 def _bing_cn(query, n):
-    r = requests.get("https://cn.bing.com/search", headers=UA, timeout=30,
-                     params={"q": query, "setmkt": "zh-CN", "ensearch": "0"})
+    """Bing 网页版抓取。注意：Bing 现已基本改为 JS 客户端渲染，静态 HTML 多无结果块，
+    通常返回 0；保留作兜底（个别地区/缓存仍可能给出 b_algo）。主力见 _so360 / _sogou。"""
+    r = requests.get("https://www.bing.com/search", headers=UA, timeout=30,
+                     params={"q": query, "mkt": "zh-CN"})
     r.encoding = r.apparent_encoding or "utf-8"
+    return _parse_bing(r.text, n)
+
+
+# 搜索引擎/导航站自身域名：从抓取结果里剔除（它们不是内容来源）
+# 搜索引擎/导航/备案页脚等非内容域名（被风控时页面常只剩这些）
+_ENGINE_HOSTS = ("bing.com", "baidu.com", "google.", "so.com", "360.cn", "360.com",
+                 "360kan.com", "sogou.com", "sogou.cn", "sm.cn", "yahoo.", "youdao.com",
+                 "hao123.com", "msn.com", "microsoft.com",
+                 "miibeian.gov.cn", "beian.gov.cn", "beian.miit.gov.cn", "icp.gov.cn")
+
+
+def _is_engine(host: str) -> bool:
+    return (not host) or any(e in host for e in _ENGINE_HOSTS)
+
+
+# ---------------- 360 搜索（so.com，国内直连、免 Key、服务端渲染、可解析）----------------
+def _so360(query, n):
+    """360 把真实目标 URL 放在结果 <a> 的 data-url/data-mdurl；href 是 so.com/link 跳转。"""
+    r = requests.get("https://www.so.com/s", timeout=30, params={"q": query},
+                     headers=dict(UA, Referer="https://www.so.com/"))
     html = r.text
-    hits = _parse_bing(html, n)
-    if not hits:                              # 诊断：区分空结果 / 验证码 / 结构变化
-        low = html.lower()
-        if "captcha" in low or "verify" in low or "blocked" in low:
-            print("      · bing_cn 可能触发了验证码/风控；建议切换 pubmed 或稍后重试。")
-        else:
-            print(f"      · bing_cn 解析到 0 条（页面长度 {len(html)}，未匹配结果块），"
-                  f"可能是结构变化或无结果，将尝试回退源。")
-    return hits
+    out, seen = [], set()
+    for am in re.finditer(r'<a\b[^>]*?\bdata-(?:url|mdurl)="(https?://[^"]+)"[^>]*>(.*?)</a>',
+                          html, re.S):
+        url = am.group(1)
+        host = _domain(url)
+        if _is_engine(host) or url in seen:                 # 跳过引擎自身/AI 卡片/去重
+            continue
+        seen.add(url)
+        out.append({"title": html_to_text(am.group(2)), "url": url, "content": ""})
+        if len(out) >= n:
+            break
+    return out
+
+
+# ---------------- 搜狗（sogou.com，国内直连、免 Key；反爬较强，时通时断，作次选）----------------
+def _sogou(query, n):
+    r = requests.get("https://www.sogou.com/web", headers=dict(UA, Referer="https://www.sogou.com/"),
+                     timeout=30, params={"query": query})
+    html = r.text
+    out, seen = [], set()
+    # 取结果区里指向站外的直链（搜狗部分结果是直链，部分是 /link?url= 跳转，这里只收直链）
+    for am in re.finditer(r'<a\b[^>]*?\bhref="(https?://[^"]+)"[^>]*>(.*?)</a>', html, re.S):
+        url, host = am.group(1), _domain(am.group(1))
+        if _is_engine(host) or url in seen:
+            continue
+        seen.add(url)
+        out.append({"title": html_to_text(am.group(2)), "url": url, "content": ""})
+        if len(out) >= n:
+            break
+    return out
+
+
+# ---------------- 维基百科 API（zh，国内可直连、免 Key、无反爬、权威）----------------
+def _wikipedia(query, n):
+    """走 MediaWiki API：先 search 拿条目，再批量取每条 intro extract。API 不反爬，最稳。"""
+    base = "https://zh.wikipedia.org/w/api.php"
+    r = requests.get(base, headers=UA, timeout=20, params={
+        "action": "query", "list": "search", "srsearch": query,
+        "srlimit": n, "format": "json"})
+    found = r.json().get("query", {}).get("search", [])
+    if not found:
+        return []
+    titles = [s["title"] for s in found]
+    extracts = {}
+    try:
+        r2 = requests.get(base, headers=UA, timeout=20, params={
+            "action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1,
+            "redirects": 1, "titles": "|".join(titles), "format": "json"})
+        for p in r2.json().get("query", {}).get("pages", {}).values():
+            extracts[p.get("title", "")] = (p.get("extract") or "").strip()
+    except Exception:
+        pass
+    out = []
+    from urllib.parse import quote
+    for s in found:
+        t = s["title"]
+        body = extracts.get(t) or html_to_text(s.get("snippet", ""))
+        out.append({"title": t, "content": body[:2000],
+                    "url": "https://zh.wikipedia.org/wiki/" + quote(t.replace(" ", "_"))})
+    return out
+
+
+# ================= 权威来源白名单（医学/学术/官方）=================
+# 只认编审制百科、临床参考、政府/卫生组织、学术期刊与索引、高校。
+# 自媒体/问答/视频/SEO 站（百家号/知乎/有来/丁香问答/抖音/B站/微信公众号/医学教育SEO等）一律不算权威。
+AUTHORITATIVE_DOMAINS = (
+    "wikipedia.org",                                   # 维基百科（编审制百科）
+    "msdmanuals.cn", "msdmanuals.com", "merckmanuals.com",  # 默沙东/默克诊疗手册
+    "medlineplus.gov", "uptodate.com", "ncbi.nlm.nih.gov",  # MedlinePlus / UpToDate / NCBI
+    "who.int", "nhc.gov.cn", "chinacdc.cn", "cdc.gov", "nih.gov", "nmpa.gov.cn",  # 官方卫生机构
+    "nejm.org", "thelancet.com", "bmj.com", "jamanetwork.com", "nature.com",      # 顶级期刊
+    "sciencedirect.com", "springer.com", "onlinelibrary.wiley.com", "cell.com",
+    "cochranelibrary.com", "academic.oup.com", "frontiersin.org", "plos.org",
+    "cma.org.cn", "yiigle.com",                        # 中华医学会 / 中华医学期刊网
+)
+
+
+def _is_authoritative(host: str) -> bool:
+    host = (host or "").lower()
+    if not host:
+        return False
+    if host.endswith(".edu") or ".edu." in host or host.endswith(".ac.cn") or ".ac.uk" in host:
+        return True                                    # 高校/科研机构
+    if host.endswith(".gov") or ".gov." in host:       # 各国政府/卫生部门
+        return True
+    return any(d in host for d in AUTHORITATIVE_DOMAINS)
+
+
+def _authoritative(query, n):
+    """只取权威来源：维基百科(API) → 抓取引擎里命中权威域名的结果(WHO/MSD/期刊/.gov/.edu…) → PubMed(学术)。
+    非权威一律丢弃；宁缺毋滥（搜不到权威就返回空）。"""
+    out, seen = [], set()
+
+    def _add(items):
+        for h in items or []:
+            u = h.get("url", "")
+            if u and u not in seen and _is_authoritative(_domain(u)):
+                seen.add(u); out.append(h)
+
+    try:
+        _add(_wikipedia(query, n))                      # 维基：权威、API、无反爬
+    except Exception:
+        pass
+    if len(out) < n:                                    # 抓取引擎只收命中权威域名的结果
+        for fn in (_so360, _sogou):
+            try:
+                _add(fn(query, n * 3))
+            except Exception:
+                pass
+            if len(out) >= n:
+                break
+    if len(out) < n:                                    # 学术兜底（英文为主）
+        try:
+            _add(_pubmed(query, n))
+        except Exception:
+            pass
+    if not out:
+        print("      · 未检索到权威来源（维基/官方/期刊/高校/PubMed）；按设置宁缺毋滥，本条不补。")
+    return out[:n]
 
 
 # ---------------- PubMed（NCBI E-utilities，学术、国内可直连、免 Key）----------------
@@ -185,12 +318,19 @@ def _domain(url: str) -> str:
         return ""
 
 
-_NOKEY = {"bing_cn", "pubmed", "ddg"}
+_NOKEY = {"authoritative", "bing_cn", "so360", "sogou", "wikipedia", "pubmed", "ddg"}
 
 
 def _dispatch(prov: str, cfg, query: str, n: int) -> list[dict]:
-    if prov == "bing_cn":
-        return _bing_cn(query, n)
+    # 默认（含旧 bing_cn 兼容）：只取权威来源（维基/官方/期刊/高校/PubMed），非权威丢弃
+    if prov in ("authoritative", "bing_cn"):
+        return _authoritative(query, n)
+    if prov == "so360":            # 显式宽搜（不过滤权威，结果含自媒体/SEO，慎用）
+        return _so360(query, n)
+    if prov == "sogou":
+        return _sogou(query, n)
+    if prov == "wikipedia":
+        return _wikipedia(query, n)
     if prov == "pubmed":
         return _pubmed(query, n)
     if prov == "ddg":
@@ -201,7 +341,8 @@ def _dispatch(prov: str, cfg, query: str, n: int) -> list[dict]:
         return _serper(query, n, cfg.search_key())
     if prov == "bing":
         return _bing_azure(query, n, cfg.search_key())
-    raise SystemExit(f"未知 search_provider: {prov}（可选 bing_cn/pubmed/ddg/tavily/serper/bing）")
+    raise SystemExit(f"未知 search_provider: {prov}"
+                     f"（可选 authoritative/bing_cn/so360/sogou/wikipedia/pubmed/ddg/tavily/serper/bing）")
 
 
 def search(cfg, query: str) -> list[dict]:

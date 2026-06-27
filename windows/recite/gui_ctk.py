@@ -279,7 +279,7 @@ class App:
                                           corner_radius=9, font=self.f, fg_color=SURFACE_SOFT,
                                           text_color=TEXT, button_color=ACCENT,
                                           button_hover_color=ACCENT_H, dropdown_fg_color=CARD,
-                                          values=["bing_cn", "pubmed", "ddg", "tavily", "serper", "bing"])
+                                          values=["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg", "tavily", "serper", "bing"])
         self.cmb_prov.pack(side="left")
         self._ghost(r2, "设置检索 Key", self._set_search_key, 116).pack(side="left", padx=8)
 

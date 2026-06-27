@@ -8,11 +8,11 @@ try:
 except ImportError:  # pragma: no cover
     raise SystemExit("缺少依赖 PyYAML，请先运行: pip install -r requirements.txt")
 
-# 程序根目录：源码运行=本项目目录；打包成 .app 后=可执行文件所在目录。
+from .util import read_text_tolerant
+
+# 程序根目录：源码运行=本项目目录；打包成 .app 后=应用同级目录。
 # （这样 .env / config.yaml / gui_state.json 始终落在用户看得见、可写入的位置）
 if getattr(sys, "frozen", False):
-    # 打包成 .app 后：可执行文件在 *.app/Contents/MacOS/ 内，包内不可写、对用户隐藏，
-    # 因此把配置落到 .app 同级目录（用户可见、可写）。
     _exe = Path(sys.executable).resolve()
     if _exe.parent.name == "MacOS" and _exe.parents[1].name == "Contents":
         ROOT = _exe.parents[3]            # MacOS -> Contents -> *.app -> 容器目录
@@ -26,7 +26,7 @@ def _load_dotenv(path: Path):
     """极简 .env 解析，不覆盖已存在的环境变量。"""
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in read_text_tolerant(path).splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -62,9 +62,9 @@ class Config:
         self.subject_note = (data.get("subject_note") or "").strip()
         self.ignore = list(data.get("ignore") or [])
 
-        # 联网核对（web 检索 → 真实来源补充）
-        self.search_provider = (data.get("search_provider") or "bing_cn").strip().lower()
-        # 主搜索源无结果时的回退源（国内可直连、免 Key）；设空字符串可关闭回退
+        # 联网核对（web 检索 → 真实来源补充）。默认只取权威来源（维基/官方/期刊/高校/PubMed），非权威丢弃。
+        self.search_provider = (data.get("search_provider") or "authoritative").strip().lower()
+        # 主搜索源无结果时的回退源（PubMed 学术、国内可直连、免 Key）；设空字符串可关闭回退
         self.search_fallback = (data.get("search_fallback", "pubmed") or "").strip().lower()
         self.search_api_key = (data.get("search_api_key") or "").strip()
         self.trusted_domains = list(data.get("trusted_domains") or [])
@@ -125,6 +125,6 @@ def load_config(config_path: str | None = None) -> Config:
             path = ROOT / "config.example.yaml"     # 退一步用示例
     data = {}
     if path.exists():
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(read_text_tolerant(path)) or {}
     # 找不到任何配置也能启动（用内置默认 + 图形界面里现选文件夹）
     return Config(data)
