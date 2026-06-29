@@ -6,7 +6,7 @@ from .deepseek import DeepSeek
 from .prompts import render_system, render_chapter
 from .extract import list_source_files
 from .build import assemble_source_text
-from .util import read_json, chapter_stem, read_text_tolerant
+from .util import read_json, chapter_stem, read_text_tolerant, coverage_gaps, objective_codes
 
 
 def _select(chapters, only):
@@ -95,6 +95,21 @@ def run_generate(cfg, only: str = "", force: bool = False, progress_cb=None) -> 
             out_path.write_text(body, encoding="utf-8")
             print(f"        ✓ 已保存 {out_path.name}  用时{dt:.0f}s，"
                   f"out_tokens={usage.get('completion_tokens',0)}")
+            # 覆盖核对：单独成文件（_覆盖核对/），绝不写进背诵稿正文
+            oe = ch.get("outline_excerpt", "")
+            codes = objective_codes(oe)
+            if codes:
+                gaps = coverage_gaps(oe, body)
+                audit_dir = cfg.output_dir / "_覆盖核对"
+                audit_dir.mkdir(parents=True, exist_ok=True)
+                rep = [f"# 覆盖核对 · {title}", "",
+                       f"> 自动生成，仅供质检，不属于背诵稿。大纲编号学习目标 {len(codes)} 条，缺失 {len(gaps)} 条。", ""]
+                rep += [f"- {c}：{'未覆盖 ✗' if c in gaps else '已覆盖 ✓'}" for c in codes]
+                (audit_dir / f"{stem}.md").write_text("\n".join(rep) + "\n", encoding="utf-8")
+                if gaps:
+                    print(f"        ⚠ 覆盖自检：缺 {', '.join(gaps)}（详见 _覆盖核对/{stem}.md），建议勾『覆盖重做』。")
+                else:
+                    print(f"        ✓ 覆盖自检通过（{len(codes)} 条全覆盖；核对表见 _覆盖核对/{stem}.md）")
         else:
             # 截断：存成 .partial.md，不覆盖正式 .md，明确警告
             partial_path.write_text(

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from recite.util import safe_index, chapter_stem
 from recite.extract import extract_text, _read_plain
-from recite.outline import slice_book
+from recite.outline import slice_book, slice_outline
 from recite.websearch import _parse_bing
 from recite.deepseek import DeepSeek, ChatResult
 
@@ -109,6 +109,45 @@ def test_slice_book_order_independent():
     assert "正文A" in sl[3] and "正文B" not in sl[3]      # 头部定位正确、不串到颈部
     assert "正文B" in sl[4]                               # 颈部定位正确
     assert sl[2] == ""                                    # 上肢课本没有 → 空（退回PPT）
+
+
+# ---------- 大纲匹配：章次与小节名被拆在表格不同单元格时仍能定位 ----------
+def test_slice_outline_table_split_heading():
+    """复现药理大纲：① 学习目标区按主题名（绪论/传出神经系统药物/化学治疗药物）作行首标题；
+    ② 进度表里『第一章 Chapter One』与小节名被 PDF 抽取拆成多行，审计据此拼成一长串
+    outline_heading。旧逻辑三个候选（长串/去前缀长串/带第X章的章标题）都无法逐字定位 →
+    全章 outline_excerpt 为空。修复后应靠『去第X章前缀的主题名』短锚点命中。"""
+    outline = (
+        "学习目标 Learning Objectives\n"
+        "总论 General principles\n"
+        "绪论 Introduction\n"
+        "1001 理解药物的概念。\n"
+        "药物代谢动力学 Pharmacokinetics\n"
+        "1101 描述药物跨膜转运方式。\n"
+        "传出神经系统药物 Drugs affecting the efferent nerve system\n"
+        "2001 阐释传出神经系统的递质和受体。\n"
+        "化学治疗药物 Chemotherapy drugs\n"
+        "3001 明确化学治疗概念和常用术语。\n"
+        "教学内容进度安排\n"
+        # 进度表里章次与小节名被拆成多行，且小节名之间夹着学习目标编号——
+        # 这正是真实大纲里 full outline_heading 无法逐字连续命中的原因。
+        "第一\n章\nChapter\nOne\n绪论 Introduction\n1001-1008\n药物代谢动力学 Pharmacokinetic\n"
+    )
+    chapters = [
+        {"index": 1, "title": "第一章 绪论",
+         "outline_heading": "第一章 Chapter One 绪论 Introduction 药物代谢动力学 Pharmacokinetic"},
+        {"index": 2, "title": "第二章 传出神经系统药物",
+         "outline_heading": "第二章 Chapter Two 传出神经系统药理概论 ..."},
+        {"index": 3, "title": "第三章 化学治疗药物",
+         "outline_heading": "第三章 Chapter Three 化学治疗药物概论 Introduction to chemotherapy"},
+    ]
+    missing = slice_outline(outline, chapters)
+    assert missing == [], f"不应有未定位章节: {missing}"
+    assert chapters[0]["outline_excerpt"].startswith("绪论"), chapters[0]["outline_excerpt"][:20]
+    assert "1001" in chapters[0]["outline_excerpt"] and "1101" in chapters[0]["outline_excerpt"]
+    assert "传出神经系统药物" not in chapters[0]["outline_excerpt"]    # 不串到下一章
+    assert "2001" in chapters[1]["outline_excerpt"]
+    assert "3001" in chapters[2]["outline_excerpt"]
 
 
 # ---------- P0-1 端到端：截断 → 存 .partial.md，不写正式 .md ----------

@@ -100,22 +100,47 @@ def slice_book(text: str, headings: list[tuple], max_chars: int = 0) -> dict:
     return res
 
 
+# 开头的“第X章/第X-Y章/第X节”行政前缀（中文或阿拉伯数字，允许范围/顿号/空白）
+_CH_PREFIX = re.compile(r"^\s*第\s*[\d一二三四五六七八九十百零,，\-－、\s]+[章节]\s*")
+
+
+def _strip_chapter_prefix(s: str) -> str:
+    """去掉标题开头的『第X章/第X节』前缀，返回主题名（如 第一章 绪论 → 绪论）。"""
+    return _CH_PREFIX.sub("", s or "").strip()
+
+
+def _first_cn_topic(s: str) -> str:
+    """取去掉章次前缀后的第一段连续中文（≥2 字）作短锚点。
+    大纲常把『第X章 Chapter One』与小节名拆在表格不同单元格，审计会拼成一长串
+    outline_heading（如 第一章 Chapter One 绪论 Introduction 药物代谢动力学 …），
+    整体永远无法逐字定位；第一段中文主题名（绪论）却能稳定命中正文标题行。"""
+    s = _CH_PREFIX.sub("", s or "")
+    m = re.search(r"[一-鿿]{2,}", s)
+    return m.group(0) if m else ""
+
+
 def _heading_candidates(ch: dict) -> list[str]:
-    """每章的定位候选，按可靠度排序：完整 outline_heading → 去掉行政前缀的主题名 → 章标题。
-    行政前缀如『病原生物学（上），第30-35章 Chapter30-35』在表格抽取里易被数字行破坏，
-    而主题名（疱疹病毒/… / Herpes viruses/…）独特且不含数字，作兜底更稳。"""
+    """每章的定位候选，按可靠度排序：
+    完整 outline_heading → 去行政前缀主题名 → 章标题 → 去“第X章”的标题主题名
+    → outline_heading 首个中文主题词。后两项是关键兜底：当大纲把章次与小节名拆在
+    表格不同单元格、审计拼成长串标题时，前三项都无法逐字定位，靠主题名短锚点命中。"""
     cands = []
+
+    def add(x):
+        x = (x or "").strip()
+        if x and x not in cands:
+            cands.append(x)
+
     h = (ch.get("outline_heading") or "").strip()
-    if h:
-        cands.append(h)
-        # 去掉 “……第X章/第X-Y章 ChapterX-Y” 这段行政前缀，留下主题名
-        tail = re.sub(r"^.*?(?:第[\d一二三四五六七八九十,，\-－、\s]+[章节]\s*)"
-                      r"(?:Chapter\s*[\d\-,\s]+)?", "", h, count=1).strip()
-        if tail and tail != h:
-            cands.append(tail)
     t = (ch.get("title") or "").strip()
-    if t and t not in cands:
-        cands.append(t)
+
+    add(h)                                                  # 1 完整 outline_heading
+    if h:                                                   # 2 去“……第X章 ChapterX-Y”行政前缀（原逻辑）
+        add(re.sub(r"^.*?(?:第[\d一二三四五六七八九十,，\-－、\s]+[章节]\s*)"
+                   r"(?:Chapter\s*[\d\-,\s]+)?", "", h, count=1))
+    add(t)                                                  # 3 章标题（如 第一章 绪论）
+    add(_strip_chapter_prefix(t))                           # 4 去“第X章”前缀的主题名（如 绪论）——关键兜底
+    add(_first_cn_topic(h))                                 # 5 outline_heading 首个中文主题词（最稳短锚点）
     return cands
 
 

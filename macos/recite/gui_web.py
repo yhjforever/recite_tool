@@ -627,7 +627,13 @@ def launch(config_path=None):
     api.window = window
     # 页面加载完成后再补回缩放边框：此时 pywebview 已应用 frameless 样式，不会被覆盖。
     window.events.loaded += lambda *a: threading.Thread(target=_frameless_setup, daemon=True).start()
+    # 关窗即退进程（关键）：pywebview 后端（Windows=WebView2/pythonnet，macOS=Cocoa）在用户
+    # 关窗后可能因非 daemon 线程卡在 teardown，webview.start() 不返回 → 之后代码永不执行，
+    # 进程残留成“无窗口僵尸”、占住单实例锁 → 下次“改动后打开”被导向僵尸/卡住 = 未响应。
+    # 故在 closed 事件里直接退进程（状态每次操作已落盘，无数据丢失）。
+    window.events.closed += lambda *a: os._exit(0)
     webview.start()
+    os._exit(0)        # 双保险：start() 真能正常返回时也退
 
 
 if __name__ == "__main__":

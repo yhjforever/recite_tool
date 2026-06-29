@@ -1058,8 +1058,8 @@ def _acquire_single_instance() -> bool:
         return True
 
 
-def _focus_existing_window() -> None:
-    """已有实例在跑：把它的窗口还原并置前，避免用户以为“没反应”而反复双击开多个。"""
+def _focus_existing_window() -> bool:
+    """找到已有实例的窗口就还原并置前；返回是否真的找到了一个活窗口。"""
     try:
         import ctypes
         u = ctypes.windll.user32
@@ -1067,15 +1067,16 @@ def _focus_existing_window() -> None:
         if hwnd:
             u.ShowWindow(hwnd, 9)                 # SW_RESTORE
             u.SetForegroundWindow(hwnd)
+            return True
     except Exception:
         pass
+    return False
 
 
 def launch(config_path=None):
-    # 单实例守卫：避免重复双击开出多个同标题窗口——多实例下 gui_web 的 FindWindowW
-    # 会命中错窗口，导致最小化/关闭/最大化按钮作用到别的窗口，表现就像“无响应”。
-    if not _acquire_single_instance():
-        _focus_existing_window()
+    # 单实例守卫：已有“活着”的实例 → 激活它并退出。但若持锁者是已崩溃/残留的僵尸
+    # （持着锁却找不到窗口），绝不把用户挡在门外——照常启动一份新的，避免“打开没反应”。
+    if not _acquire_single_instance() and _focus_existing_window():
         return
     # 三级回退：① Web 版（pywebview + WebView2，最美观、动画最顺）
     #          ② CustomTkinter 圆角版  ③ ttk(bootstrap/clam) 版
