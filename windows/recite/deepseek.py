@@ -43,6 +43,8 @@ class DeepSeek:
                 # 限流 / 服务端错误：退避重试
                 if resp.status_code in (429, 500, 502, 503, 504):
                     last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    if attempt >= self.cfg.max_retries:      # 最后一次失败：不再退避白等，直接报错
+                        break
                     wait = self.cfg.retry_backoff * attempt
                     print(f"    · API {resp.status_code}，{wait:.0f}s 后重试 ({attempt}/{self.cfg.max_retries})")
                     time.sleep(wait)
@@ -59,6 +61,8 @@ class DeepSeek:
                 raise RuntimeError(f"DeepSeek API 错误 HTTP {resp.status_code}: {resp.text[:500]}")
             except (requests.Timeout, requests.ConnectionError) as e:
                 last_err = str(e)
+                if attempt >= self.cfg.max_retries:          # 最后一次失败：不再退避白等，直接报错
+                    break
                 wait = self.cfg.retry_backoff * attempt
                 print(f"    · 网络异常({type(e).__name__})，{wait:.0f}s 后重试 ({attempt}/{self.cfg.max_retries})")
                 time.sleep(wait)

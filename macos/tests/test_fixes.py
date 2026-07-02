@@ -111,6 +111,26 @@ def test_slice_book_order_independent():
     assert sl[2] == ""                                    # 上肢课本没有 → 空（退回PPT）
 
 
+# ---------- 整本课本 >20 章：第 20 章起不得混入后续章节正文 ----------
+def test_slice_book_beyond_twenty_chapters():
+    """回归：旧版章节边界用中文数字表枚举、止于“二十”，25 章教材从第 20 章起
+    找不到“下一章”边界，切片一路延伸到书尾、把后续章节正文混进本章。"""
+    cn = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+          "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+          "二十一", "二十二", "二十三", "二十四", "二十五"]
+
+    def chap(n):
+        page = f"第{cn[n]}章 主题{cn[n]}区 正文{n}号内容。" + "填充" * 120   # 一“页”约 500 字
+        return page * 4                                                    # 4 页，页眉密度 ≥2
+
+    book = "".join(chap(n) for n in range(1, 26))
+    headings = [(n, f"第{cn[n]}章 主题{cn[n]}区") for n in range(1, 26)]
+    sl = slice_book(book, headings)
+    assert "正文20号" in sl[20] and "正文21号" not in sl[20], "第20章混入了第21章正文"
+    assert "正文21号" in sl[21] and "正文22号" not in sl[21], "第21章混入了第22章正文"
+    assert "正文25号" in sl[25]                              # 最末章正常收尾
+
+
 # ---------- 大纲匹配：章次与小节名被拆在表格不同单元格时仍能定位 ----------
 def test_slice_outline_table_split_heading():
     """复现药理大纲：① 学习目标区按主题名（绪论/传出神经系统药物/化学治疗药物）作行首标题；
@@ -148,6 +168,60 @@ def test_slice_outline_table_split_heading():
     assert "传出神经系统药物" not in chapters[0]["outline_excerpt"]    # 不串到下一章
     assert "2001" in chapters[1]["outline_excerpt"]
     assert "3001" in chapters[2]["outline_excerpt"]
+
+
+# ---------- 联网核对结果解析：类型宽容，单个编号异常不中断整章 ----------
+def test_verify_result_parsing_is_type_tolerant():
+    from recite.verify import _as_bool, _as_indices
+
+    # covered 宽容布尔：字符串 "false" 不能被当作真（普通 truthy 会误判）
+    assert _as_bool(True) is True and _as_bool(False) is False
+    assert _as_bool("true") is True and _as_bool("True") is True
+    assert _as_bool("false") is False and _as_bool("False") is False
+    assert _as_bool("yes") is True and _as_bool("是") is True
+    assert _as_bool("0") is False and _as_bool("1") is True
+    assert _as_bool(None) is False and _as_bool("") is False
+    assert _as_bool(1) is True and _as_bool(0) is False
+
+    # sources 宽容编号：字符串编号转整数
+    assert _as_indices(["1", "2"], 3) == [1, 2]
+    assert _as_indices([1, 2], 3) == [1, 2]
+    # 单个编号异常（非数字）被跳过，不抛异常、不中断整章
+    assert _as_indices(["1", "x", "2"], 3) == [1, 2]
+    # 越界编号被过滤
+    assert _as_indices(["5", "2"], 3) == [2]
+    # 去重保序
+    assert _as_indices(["2", "2", "1"], 3) == [2, 1]
+    # None / 单个非列表值 / '1.0' 都能安全处理
+    assert _as_indices(None, 3) == []
+    assert _as_indices("2", 3) == [2]
+    assert _as_indices(["1.0"], 3) == [1]
+
+
+# ---------- 界面读取已生成 .md：用户另存为 ANSI/GBK 后仍能读出待核清单 ----------
+def test_gui_scan_gaps_reads_gbk_md():
+    """回归：章节详情/待核清单原用严格 utf-8 读 .md，用户用记事本另存为 ANSI(GBK)
+    后中文触发 UnicodeDecodeError，待核清单读不出。改用 read_text_tolerant 后应能读。
+    以可离线实例化的 gui_web.Api 为代表（三套界面此处逻辑一致）。"""
+    import json
+    import recite.gui_web as gw
+    from recite.util import chapter_stem as _stem
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "_recite").mkdir()
+        (d / "_recite" / "audit.json").write_text(json.dumps({
+            "subject": "测试", "chapters": [{"index": 1, "title": "绪论", "outline_excerpt": ""}],
+        }, ensure_ascii=False), encoding="utf-8")
+        out = d / "output"; out.mkdir()
+        md = "# 测试·绪论\n\n## 待核（〔补〕补充项）\n- 某个中文待核知识点\n"
+        (out / f"{_stem(1, '绪论')}.md").write_bytes(md.encode("gb18030"))   # 记事本 ANSI/GBK 另存
+
+        api = gw.Api()
+        api.source = str(d)
+        gaps = api._scan_gaps()                                  # 旧代码此处会 UnicodeDecodeError
+        found = [it for items in gaps.values() for it in items]
+        assert any("某个中文待核知识点" in it for it in found), f"GBK 的 .md 未能读出待核项: {gaps}"
 
 
 # ---------- P0-1 端到端：截断 → 存 .partial.md，不写正式 .md ----------
@@ -244,6 +318,59 @@ def test_deepseek_friendly_auth_and_billing_errors():
             assert "余额" in str(e), str(e)
     finally:
         dsmod.requests.post = orig
+
+
+# ---------- provider 清单统一：三套界面/config/websearch 共用一份，默认值必在下拉里 ----------
+def test_providers_single_source_of_truth():
+    from recite.providers import (PROVIDERS, KEYLESS_PROVIDERS,
+                                  KEYED_PROVIDER_ENV, DEFAULT_PROVIDER)
+    from recite import websearch
+    from recite.config import Config
+
+    assert DEFAULT_PROVIDER in PROVIDERS                       # 默认值必须在下拉选项里
+    assert "bing_cn" in PROVIDERS and "authoritative" in PROVIDERS
+    assert set(KEYLESS_PROVIDERS) | set(KEYED_PROVIDER_ENV) == set(PROVIDERS)
+    assert set(KEYLESS_PROVIDERS) & set(KEYED_PROVIDER_ENV) == set()
+    assert websearch._NOKEY == set(KEYLESS_PROVIDERS)          # 免Key判断同源
+    assert Config({}).search_provider == DEFAULT_PROVIDER      # config 默认与统一默认一致
+    # 三套界面不再各自维护 provider 字面量列表
+    root = Path(__file__).resolve().parents[1] / "recite"
+    for name in ("gui.py", "gui_ctk.py", "gui_web.py"):
+        src = (root / name).read_text(encoding="utf-8")
+        assert '"authoritative", "wikipedia"' not in src, f"{name} 仍有本地 provider 字面量列表"
+        assert "PROVIDERS" in src, f"{name} 未引用统一 PROVIDERS"
+
+
+# ---------- 重试：最后一次失败不再 sleep 白等 ----------
+def test_deepseek_no_sleep_after_final_retry():
+    import recite.deepseek as dsmod
+
+    class _Resp429:
+        status_code = 429
+        text = "rate limited"
+
+        def json(self):
+            return {}
+
+    class _Cfg3(_Cfg):
+        max_retries = 3
+        retry_backoff = 5
+
+    sleeps = []
+    ds = dsmod.DeepSeek(_Cfg3())
+    orig_post, orig_sleep = dsmod.requests.post, dsmod.time.sleep
+    try:
+        dsmod.requests.post = lambda *a, **k: _Resp429()
+        dsmod.time.sleep = lambda s: sleeps.append(s)
+        try:
+            ds.chat([{"role": "user", "content": "hi"}])
+            assert False, "429 用尽重试应抛错"
+        except RuntimeError as e:
+            assert "429" in str(e), str(e)
+    finally:
+        dsmod.requests.post, dsmod.time.sleep = orig_post, orig_sleep
+    # 3 次尝试只应在第 1、2 次失败后退避；最后一次失败直接报错（旧代码会 sleep 3 次）
+    assert len(sleeps) == 2, f"最后一次失败不应再 sleep：{sleeps}"
 
 
 def _run_all():

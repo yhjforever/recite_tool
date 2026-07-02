@@ -326,13 +326,13 @@ textarea.fld{resize:none;width:100%;line-height:1.6}
 <div id="toast" class="toast"></div>
 
 <script>
-let S = { chapters:[], checked:new Set(), sel:null, busy:false, hasOutput:false,
+let S = { chapters:[], checked:new Set(), sel:null, busy:false, hasOutput:false, sourceKey:'',
           providers:[], keyless:[], hasKey:false };
 
 /* ---------- 工具 ---------- */
 function $(id){return document.getElementById(id);}
 function api(){return window.pywebview.api;}
-function esc(s){return (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function show(id){$(id).classList.add('show');}
 function hide(id){$(id).classList.remove('show');}
 let toastT=null;
@@ -367,6 +367,8 @@ async function boot(){
     applyData(d);
     if(d.source){ $('settings').classList.add('collapsed'); }   // 已配置则默认收起
     (d.warnings||[]).forEach(w=>logLine('  ! '+w));
+    if(!d.has_key){ askKey(); }        // 首启引导：还没有 Key 就直接弹输入框，不让新用户面对一排禁用按钮
+    drainEvents();                     // 取走初始化期间积压的后端消息（空闲期无轮询）
   }catch(e){ logLine('[渲染错误] '+(e&&e.message?e.message:e)); }
 }
 window.addEventListener('pywebviewready', boot, {once:true});
@@ -374,7 +376,15 @@ boot();
 window.onerror=function(msg,src,ln){ try{ logLine('[JS错误] '+msg+' @'+ln); }catch(_){} };
 
 function applyData(d){
+  // 同一资料夹刷新时保留已勾选章节；换资料夹时清空，避免旧课程同号章节被误勾选。
+  const nextSource=(d.source!==undefined?String(d.source||''):S.sourceKey);
+  const sameSource=nextSource===S.sourceKey;
+  const prevChecked=sameSource
+    ? new Set([...S.checked].map(i=>S.chapters[i]&&String(S.chapters[i].index)).filter(Boolean))
+    : new Set();
   S.chapters=d.chapters||[]; S.hasOutput=!!d.has_output; S.checked.clear(); S.sel=null;
+  S.chapters.forEach((c,i)=>{ if(prevChecked.has(String(c.index))) S.checked.add(i); });
+  S.sourceKey=nextSource;
   $('st-subject').textContent=d.subject_label||'—';
   $('st-n').textContent=d.n_chapters||0; $('st-done').textContent=d.n_done||0;
   renderTable(); setReaderHint(); updateActions();
@@ -404,7 +414,7 @@ function renderTable(){
              : '<span class="st-none">未生成</span>';
     return `<div class="trow" data-i="${i}" onclick="selectRow(${i})">
       <span style="text-align:center"><input type="checkbox" class="cbx" data-i="${i}"
-        onclick="event.stopPropagation();toggleCheck(${i},this.checked)"></span>
+        ${S.checked.has(i)?'checked':''} onclick="event.stopPropagation();toggleCheck(${i},this.checked)"></span>
       <span class="c">${st}</span><span class="c num">${esc(c.index)}</span>
       <span class="c" title="${esc(c.title)}">${esc(c.title)}</span>
       <span class="c src" title="${esc(c.src)}">${esc(c.src)}</span>
@@ -453,6 +463,7 @@ async function chooseSource(){
   const r = await api().choose_source();
   if(!r.chosen) return;
   $('f-source').value=r.source; applyData(r); toast('已选择资料文件夹','ok');
+  drainEvents();
 }
 async function onProviderChange(){
   const r = await api().get_search_status($('f-provider').value);
@@ -465,6 +476,7 @@ async function submitKey(){
   const k=$('key-input').value.trim(); if(!k){hide('m-key');return;}
   const r=await api().set_key(k); hide('m-key'); setKey(r.has_key);
   if(r.has_key) toast('API Key 已保存','ok');
+  drainEvents();                     // 空闲期无轮询：立即取走后端的“已保存”日志
 }
 async function setSearchKey(){
   const p=$('f-provider').value; const r=await api().search_key_info(p);
@@ -476,6 +488,7 @@ async function submitSearchKey(){
   const k=$('skey-input').value.trim(); if(!k){hide('m-skey');return;}
   const r=await api().set_search_key($('f-provider').value,k); hide('m-skey');
   $('st-search').textContent=r.status; toast(r.msg,'ok');
+  drainEvents();
 }
 async function checkShare(){
   const r=await api().check_share_keys(); if(!r.chosen) return;

@@ -1,11 +1,13 @@
-"""可插拔联网检索。默认 bing_cn（cn.bing.com，中国大陆可直连、免 Key），
-另含 pubmed（学术，国内可直连）、ddg、tavily/serper/bing(Azure)。
+"""可插拔联网检索。默认 bing_cn（authoritative 权威来源聚合的兼容旧名，免 Key），
+另含 wikipedia/pubmed/so360/sogou/ddg、tavily/serper/bing(Azure)。
 返回 [{title, url, content}]，可抓网页正文、按可信域名优先。"""
 import re
 from urllib.parse import urlparse
 from html.parser import HTMLParser
 
 import requests
+
+from .providers import PROVIDERS, KEYLESS_PROVIDERS
 
 UA = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -318,7 +320,7 @@ def _domain(url: str) -> str:
         return ""
 
 
-_NOKEY = {"authoritative", "bing_cn", "so360", "sogou", "wikipedia", "pubmed", "ddg"}
+_NOKEY = set(KEYLESS_PROVIDERS)
 
 
 def _dispatch(prov: str, cfg, query: str, n: int) -> list[dict]:
@@ -341,8 +343,7 @@ def _dispatch(prov: str, cfg, query: str, n: int) -> list[dict]:
         return _serper(query, n, cfg.search_key())
     if prov == "bing":
         return _bing_azure(query, n, cfg.search_key())
-    raise SystemExit(f"未知 search_provider: {prov}"
-                     f"（可选 authoritative/bing_cn/so360/sogou/wikipedia/pubmed/ddg/tavily/serper/bing）")
+    raise SystemExit(f"未知 search_provider: {prov}（可选 {'/'.join(PROVIDERS)}）")
 
 
 def search(cfg, query: str) -> list[dict]:

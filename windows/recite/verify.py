@@ -60,6 +60,38 @@ def _ground(ds: DeepSeek, subject: str, point: str, hits: list[dict]) -> dict:
         return {"covered": False, "content": "", "sources": []}
 
 
+def _as_bool(v) -> bool:
+    """宽容布尔：模型可能把 covered 返回成字符串。
+    'true'/'1'/'yes'/'y'/'是'/'真' 视为真；'false'/'0'/'no'/'' 及 None 视为假。
+    注意：普通 truthy 判断会把字符串 'false' 当成真，故必须显式转换。"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "y", "是", "真")
+    return bool(v)
+
+
+def _as_indices(raw, n: int) -> list:
+    """把模型返回的 sources 宽容转成 1..n 范围内的整数编号列表：
+    容忍字符串编号（"1"）、单个非列表值、'1.0' 之类；单个元素解析失败或越界则跳过，
+    绝不因某个编号异常而抛错中断整章核对。去重保序。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raw = [raw]
+    out = []
+    for x in raw:
+        try:
+            i = int(float(str(x).strip()))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if 1 <= i <= n and i not in out:
+            out.append(i)
+    return out
+
+
 def _strip_old_section(md: str) -> str:
     idx = md.find("\n" + SECTION_MARK)
     return md[:idx].rstrip() + "\n" if idx >= 0 else md.rstrip() + "\n"
@@ -109,8 +141,9 @@ def run_verify(cfg, only: str = "", force: bool = False, progress_cb=None) -> No
                 continue
             data = _ground(ds, subject, p, hits)
             content = (data.get("content") or "").strip()
-            if data.get("covered") and content:
-                used = [hits[i - 1] for i in (data.get("sources") or []) if 1 <= i <= len(hits)] or hits[:1]
+            if _as_bool(data.get("covered")) and content:
+                idxs = _as_indices(data.get("sources"), len(hits))
+                used = [hits[i - 1] for i in idxs] or hits[:1]
                 cite = "；".join(f"{(u.get('title') or u.get('url'))[:40]} {u.get('url')}" for u in used[:2])
                 lines.append(f"- 〔网核〕【{p[:40]}】{content}（来源：{cite}）")
                 print(f"      ✓ {p[:24]} → 已补 ({len(used)} 源)")

@@ -16,18 +16,15 @@ from .audit import run_audit
 from .build import run_build
 from .generate import run_generate
 from .verify import run_verify
-from .util import read_json, chapter_stem
+from .util import read_json, chapter_stem, read_text_tolerant
 # 复用 ttk 版里已写好的本地存储 / 环境变量助手，避免重复实现
 from .gui import (read_env_key, write_env_kv, write_env_key, load_state, save_state,
                   SEARCH_ENV, ENV_PATH)
+from .providers import PROVIDERS, KEYLESS_PROVIDERS, DEFAULT_PROVIDER
 
 CANVAS = "#FAF6EF"   # 纸色（与前端一致，用于窗口底色与标题栏染色）
 INK = "#33302A"      # 墨色
 TITLE = "背诵稿生成器 · recite_tool"
-
-PROVIDERS = ["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg",
-             "tavily", "serper", "bing", "bing_cn"]
-KEYLESS_PROVIDERS = ["authoritative", "bing_cn", "so360", "sogou", "wikipedia", "pubmed", "ddg"]
 
 
 def _html_path():
@@ -72,7 +69,7 @@ class Api:
         self.source = ""
         self.subject = ""
         self.note = ""
-        self.provider = "bing_cn"
+        self.provider = DEFAULT_PROVIDER
         self._max = False                 # 自绘标题栏的最大化状态
         self._restore = None              # 还原用的窗口矩形 (x,y,w,h)
         self._events = []                 # 待前端轮询取走的事件（日志/阶段/进度/完成）
@@ -124,7 +121,7 @@ class Api:
 
     def _persist(self):
         save_state({"source_dir": self.source.strip(), "subject": self.subject.strip(),
-                    "subject_note": self.note.strip(), "search_provider": self.provider or "bing_cn"})
+                    "subject_note": self.note.strip(), "search_provider": self.provider or DEFAULT_PROVIDER})
 
     # ---------- 章节 / 详情 ----------
     def _audit_path(self):
@@ -180,7 +177,7 @@ class Api:
         srcs = ch.get("sources_resolved") or [ch.get("source_resolved") or ch.get("source_file") or "无"]
         n_sup = 0
         if md.exists():
-            for ln in md.read_text(encoding="utf-8").splitlines():
+            for ln in read_text_tolerant(md).splitlines():
                 t = ln.strip()
                 if not t.startswith(("#", ">")) and ("〔网核〕" in t or "〔补〕" in t):
                     n_sup += 1
@@ -201,7 +198,7 @@ class Api:
             f = out / f"{chapter_stem(ch.get('index'), ch.get('title',''))}.md"
             if not f.exists():
                 continue
-            lines = f.read_text(encoding="utf-8").splitlines()
+            lines = read_text_tolerant(f).splitlines()
             hits, in_sec, sec_found = [], False, False
             for ln in lines:
                 s = ln.strip()
@@ -240,10 +237,10 @@ class Api:
                 self._log("[初始化异常] " + traceback.format_exc())
             except Exception:
                 pass
-            return {"source": "", "subject": "", "note": "", "provider": "bing_cn",
+            return {"source": "", "subject": "", "note": "", "provider": DEFAULT_PROVIDER,
                     "has_key": False, "env_path": str(ENV_PATH),
                     "providers": list(PROVIDERS), "keyless_providers": list(KEYLESS_PROVIDERS),
-                    "search_status": self._search_status("bing_cn"),
+                    "search_status": self._search_status(DEFAULT_PROVIDER),
                     "chapters": [], "subject_label": "—", "n_chapters": 0,
                     "n_done": 0, "has_output": False, "warnings": []}
 
@@ -259,7 +256,7 @@ class Api:
         self.source = st.get("source_dir") or cfg_src or ""
         self.subject = st.get("subject", "")
         self.note = st.get("subject_note", "")
-        self.provider = st.get("search_provider", "bing_cn") or "bing_cn"
+        self.provider = st.get("search_provider") or DEFAULT_PROVIDER
         d = {"source": self.source, "subject": self.subject, "note": self.note,
              "provider": self.provider, "has_key": bool(read_env_key()), "env_path": str(ENV_PATH),
              "providers": list(PROVIDERS), "keyless_providers": list(KEYLESS_PROVIDERS),
@@ -268,7 +265,7 @@ class Api:
         return d
 
     def _search_status(self, prov):
-        prov = (prov or "bing_cn").strip() or "bing_cn"
+        prov = (prov or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV:
             has = bool(os.environ.get(SEARCH_ENV[prov]))
             return f"检索源 {prov}（需Key·{'已设置' if has else '未设置'}）"
@@ -281,7 +278,7 @@ class Api:
     def search_key_info(self, provider):
         if provider in SEARCH_ENV:
             return {"keyless": False}
-        tip = {"bing_cn": "bing_cn（cn.bing.com）国内可直连、无需 Key。",
+        tip = {"bing_cn": "bing_cn＝authoritative 的旧名（权威来源聚合：维基/官方/期刊/PubMed），免 Key、国内可直连。",
                "pubmed": "pubmed（NCBI）学术、国内可直连、无需 Key。",
                "ddg": "ddg 免费、无需 Key；需安装一次：pip install ddgs"}.get(provider, "该来源无需 Key。")
         return {"keyless": True, "msg": tip}
@@ -337,10 +334,8 @@ class Api:
         return {"ok": True}
 
     # ---------- 自绘标题栏：窗口控制（跨平台）----------
-    # Windows：从 js_api 工作线程直接调 self.window.minimize()/destroy() 会跨线程访问
-    #   WebView2（仅 UI 线程可用）→ COM 异常/递归 → 卡死；故 Windows 用 PostMessage
-    #   把消息投进窗口队列、由 UI 线程处理。
-    # macOS/Linux：没有 windll，直接用 pywebview 跨平台 API。
+    # Windows：js_api 跑在工作线程，直接碰 WebView2 控件会跨线程异常；用 PostMessage
+    # 把消息投进窗口队列。macOS/Linux 则走 pywebview 的跨平台 API。
     def _hwnd(self):
         import ctypes
         return ctypes.windll.user32.FindWindowW(None, TITLE)
@@ -349,7 +344,7 @@ class Api:
         try:
             if sys.platform == "win32":
                 import ctypes
-                ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0112, 0xF020, 0)  # SC_MINIMIZE
+                ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0112, 0xF020, 0)
             else:
                 self.window.minimize()
         except Exception:
@@ -359,7 +354,7 @@ class Api:
         try:
             if sys.platform == "win32":
                 import ctypes
-                ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0010, 0, 0)        # WM_CLOSE
+                ctypes.windll.user32.PostMessageW(self._hwnd(), 0x0010, 0, 0)
             else:
                 self.window.destroy()
         except Exception:
@@ -371,7 +366,7 @@ class Api:
         macOS/Linux 回退到 pywebview 的 maximize/restore。"""
         try:
             if sys.platform != "win32":
-                raise RuntimeError("non-windows → 用跨平台回退")
+                raise RuntimeError("non-windows fallback")
             import ctypes
             from ctypes import wintypes
             u = ctypes.windll.user32
@@ -398,7 +393,7 @@ class Api:
                     u.SetWindowPos(hwnd, 0, x, y, ww, hh, SWP_NOZORDER)
                 self._max = False
         except Exception:
-            try:                                   # 非 Windows / 取不到 hwnd：系统 maximize/restore
+            try:
                 (self.window.restore if self._max else self.window.maximize)()
                 self._max = not self._max
             except Exception:
@@ -555,7 +550,7 @@ class Api:
         bad = self._precheck(source)
         if bad:
             return bad
-        prov = (provider or "bing_cn").strip() or "bing_cn"
+        prov = (provider or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV and not os.environ.get(SEARCH_ENV[prov]):
             try:
                 has_key = bool(self._cfg(source, "", "", provider=prov).search_key())
@@ -627,9 +622,9 @@ def launch(config_path=None):
     api.window = window
     # 页面加载完成后再补回缩放边框：此时 pywebview 已应用 frameless 样式，不会被覆盖。
     window.events.loaded += lambda *a: threading.Thread(target=_frameless_setup, daemon=True).start()
-    # 关窗即退进程（关键）：pywebview 后端（Windows=WebView2/pythonnet，macOS=Cocoa）在用户
-    # 关窗后可能因非 daemon 线程卡在 teardown，webview.start() 不返回 → 之后代码永不执行，
-    # 进程残留成“无窗口僵尸”、占住单实例锁 → 下次“改动后打开”被导向僵尸/卡住 = 未响应。
+    # 关窗即退进程（关键）：pywebview 后端（Windows=WebView2/pythonnet，macOS=Cocoa）在
+    # 用户关窗后可能卡在 teardown 里不返回 → start() 之后的代码永不执行，进程残留成
+    # “无窗口僵尸”，占住单实例锁、锁住 WebView2 → 下次“改动后打开”被导向僵尸/卡死 = 未响应。
     # 故在 closed 事件里直接退进程（状态每次操作已落盘，无数据丢失）。
     window.events.closed += lambda *a: os._exit(0)
     webview.start()

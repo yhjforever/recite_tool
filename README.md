@@ -8,9 +8,9 @@
 
 ### 直接点这里下载
 
-- 当前最新版：`v1.2.0`
-- **Windows 10 / 11：[下载 Windows 版 recite_tool_windows.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.2.0/recite_tool_windows.zip)**
-- **macOS：[下载 macOS 版 recite_tool_macos.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.2.0/recite_tool_macos.zip)**
+- 当前最新版：`v1.2.1`
+- **Windows 10 / 11：[下载 Windows 版 recite_tool_windows.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.2.1/recite_tool_windows.zip)**
+- **macOS：[下载 macOS 版 recite_tool_macos.zip](https://github.com/yhjforever/recite_tool/releases/download/v1.2.1/recite_tool_macos.zip)**
 
 下载完毕后，先右键压缩包选“解压”，再按下面的对应步骤打开。
 
@@ -21,8 +21,8 @@
 
 | 你的电脑 | 请下载这个文件 | 解压后双击这个 |
 |---|---|---|
-| Windows 10 / 11 | [`recite_tool_windows.zip`](https://github.com/yhjforever/recite_tool/releases/download/v1.2.0/recite_tool_windows.zip) | `背诵稿生成器\背诵稿生成器.exe` |
-| macOS | [`recite_tool_macos.zip`](https://github.com/yhjforever/recite_tool/releases/download/v1.2.0/recite_tool_macos.zip) | `recite_tool_mac\启动.command` |
+| Windows 10 / 11 | [`recite_tool_windows.zip`](https://github.com/yhjforever/recite_tool/releases/download/v1.2.1/recite_tool_windows.zip) | `背诵稿生成器\背诵稿生成器.exe` |
+| macOS | [`recite_tool_macos.zip`](https://github.com/yhjforever/recite_tool/releases/download/v1.2.1/recite_tool_macos.zip) | `recite_tool_mac\启动.command` |
 
 3. 不要下载 Release 页面最下面的 `Source code (zip)` 或 `Source code (tar.gz)`，那是给会写代码的人看的源码，不是直接可用的软件。
 

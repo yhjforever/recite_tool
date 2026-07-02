@@ -9,6 +9,7 @@ except ImportError:  # pragma: no cover
     raise SystemExit("缺少依赖 PyYAML，请先运行: pip install -r requirements.txt")
 
 from .util import read_text_tolerant
+from .providers import DEFAULT_PROVIDER, KEYED_PROVIDER_ENV
 
 # 程序根目录：源码运行=本项目目录；PyInstaller 打包后=exe 所在目录
 # （这样 .env / config.yaml / gui_state.json 始终落在用户看得见的位置）
@@ -58,8 +59,9 @@ class Config:
         self.subject_note = (data.get("subject_note") or "").strip()
         self.ignore = list(data.get("ignore") or [])
 
-        # 联网核对（web 检索 → 真实来源补充）。默认只取权威来源（维基/官方/期刊/高校/PubMed），非权威丢弃。
-        self.search_provider = (data.get("search_provider") or "authoritative").strip().lower()
+        # 联网核对（web 检索 → 真实来源补充）。默认 bing_cn＝权威来源聚合（authoritative 的旧名）：
+        # 只取维基/官方/期刊/高校/PubMed，非权威丢弃。
+        self.search_provider = (data.get("search_provider") or DEFAULT_PROVIDER).strip().lower()
         # 主搜索源无结果时的回退源（PubMed 学术、国内可直连、免 Key）；设空字符串可关闭回退
         self.search_fallback = (data.get("search_fallback", "pubmed") or "").strip().lower()
         self.search_api_key = (data.get("search_api_key") or "").strip()
@@ -101,12 +103,11 @@ class Config:
 
     def search_key(self) -> str:
         """检索 Key：优先环境变量（按 provider），其次 config 的 search_api_key。"""
-        env_name = {"tavily": "TAVILY_API_KEY", "serper": "SERPER_API_KEY",
-                    "bing": "BING_API_KEY"}.get(self.search_provider)
+        env_name = KEYED_PROVIDER_ENV.get(self.search_provider)
         return ((os.environ.get(env_name) if env_name else "") or self.search_api_key or "").strip()
 
     def require_search_key(self):
-        if self.search_provider in ("tavily", "serper", "bing") and not self.search_key():
+        if self.search_provider in KEYED_PROVIDER_ENV and not self.search_key():
             raise SystemExit(f"联网核对所选 provider={self.search_provider} 需要检索 Key："
                              f"请在界面“设置检索Key”或 .env 填入对应的 KEY。")
 

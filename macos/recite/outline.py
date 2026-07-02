@@ -42,8 +42,9 @@ def slice_text(text: str, headings: list[tuple]) -> dict:
     return res
 
 
-_CN = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
-       "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十"]
+# “第X章”标记：中文数字（含 百/零，如 二十一、一百零三）或阿拉伯数字。
+# {1,7} 上限防止把超长数字串误当章号。
+_BOUND_RE = re.compile(r"第([一二三四五六七八九十百零]{1,7}|\d{1,7})章")
 
 
 def _densest(text: str, pat, window: int = 4000):
@@ -58,6 +59,26 @@ def _densest(text: str, pat, window: int = 4000):
     return best_p, best_d
 
 
+def _chapter_boundaries(text: str, window: int = 4000) -> list[int]:
+    """单遍扫描全文“第X章”标记，按章号分组、组内取密集簇代表位置作章节边界。
+    密度 ≥2（正文页眉每页重复）才算数，与 _densest 的目录过滤规则一致。
+    不限章数——旧版用中文数字表枚举、止于“二十”，超过 20 章的教材从第 20 章起
+    找不到下一章边界，切片会一路延伸、混入后续章节正文。"""
+    groups: dict[str, list[int]] = {}
+    for m in _BOUND_RE.finditer(text):
+        groups.setdefault(m.group(1), []).append(m.start())
+    bounds = []
+    for poss in groups.values():
+        best_p, best_d = None, -1
+        for p in poss:
+            d = sum(1 for q in poss if p <= q < p + window)
+            if d > best_d:
+                best_d, best_p = d, p
+        if best_d >= 2:
+            bounds.append(best_p)
+    return sorted(set(bounds))
+
+
 def slice_book(text: str, headings: list[tuple], max_chars: int = 0) -> dict:
     """把"整本电子课本"按各章切片，返回 {key: 片段}。
     课本章节物理顺序未必同大纲顺序，且区域名在全书到处出现，故：
@@ -66,14 +87,8 @@ def slice_book(text: str, headings: list[tuple], max_chars: int = 0) -> dict:
     若课本不用"第X章"体例，则返回空（该章退回只用 PPT）。"""
     NUMS = "一二三四五六七八九十百0-9"
 
-    # ① 全部教材章节边界（按章序号找密集页眉簇，过滤目录里的稀疏命中）
-    boundaries = []
-    for n in range(1, len(_CN)):
-        pat = re.compile("第" + _CN[n] + "章")
-        p, d = _densest(text, pat)
-        if p is not None and d >= 2:          # 出现≥2次＝正文页眉重复，非目录
-            boundaries.append(p)
-    boundaries = sorted(set(boundaries))
+    # ① 全部教材章节边界（单遍正则找密集页眉簇，过滤目录稀疏命中；不限章数）
+    boundaries = _chapter_boundaries(text)
 
     # ② 每个大纲区域定位正文起点，终点取下一个章节边界
     res = {key: "" for key, _ in headings}

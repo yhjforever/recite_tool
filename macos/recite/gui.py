@@ -21,8 +21,9 @@ from .build import run_build
 from .generate import run_generate
 from .verify import run_verify
 from .util import read_json, chapter_stem, read_text_tolerant
+from .providers import PROVIDERS, KEYED_PROVIDER_ENV, DEFAULT_PROVIDER
 
-SEARCH_ENV = {"tavily": "TAVILY_API_KEY", "serper": "SERPER_API_KEY", "bing": "BING_API_KEY"}
+SEARCH_ENV = KEYED_PROVIDER_ENV      # 兼容旧名：gui_ctk / gui_web 从这里导入
 
 ENV_PATH = ROOT / ".env"
 STATE_PATH = ROOT / "gui_state.json"
@@ -133,7 +134,7 @@ class App:
 
         self.var_source = tk.StringVar()
         self.var_subject = tk.StringVar()
-        self.var_provider = tk.StringVar(value="bing_cn")
+        self.var_provider = tk.StringVar(value=DEFAULT_PROVIDER)
         self.var_overwrite = tk.BooleanVar(value=False)
         self.var_keystat = tk.StringVar(value="未设置 ✗")
         self.var_status = tk.StringVar(value="就绪")
@@ -311,7 +312,7 @@ class App:
         self._inputs.append((ent_subj, "normal"))
         ttk.Label(r3, text="（留空自动判断）　联网核对来源：").pack(side="left")
         cmb = ttk.Combobox(r3, textvariable=self.var_provider, width=10, state="readonly",
-                           values=["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg", "tavily", "serper", "bing"])
+                           values=PROVIDERS)
         cmb.pack(side="left", padx=4)
         self._inputs.append((cmb, "readonly"))
         b = ttk.Button(r3, text="设置检索Key", command=self._set_search_key, **self._kw_sec)
@@ -456,7 +457,7 @@ class App:
             pass
         self.var_source.set(st.get("source_dir") or cfg_src)
         self.var_subject.set(st.get("subject", ""))
-        self.var_provider.set(st.get("search_provider", "bing_cn") or "bing_cn")
+        self.var_provider.set(st.get("search_provider") or DEFAULT_PROVIDER)
         self.txt_note.delete("1.0", "end")
         self.txt_note.insert("1.0", st.get("subject_note", ""))
 
@@ -465,7 +466,7 @@ class App:
             "source_dir": self.var_source.get().strip(),
             "subject": self.var_subject.get().strip(),
             "subject_note": self.txt_note.get("1.0", "end").strip(),
-            "search_provider": self.var_provider.get().strip() or "bing_cn",
+            "search_provider": self.var_provider.get().strip() or DEFAULT_PROVIDER,
         })
         self.var_status.set("设置已保存")
         self._log("设置已保存。\n")
@@ -499,7 +500,6 @@ class App:
         try:
             os.startfile(str(out))            # Windows
         except AttributeError:
-            import sys
             opener = "open" if sys.platform == "darwin" else "xdg-open"
             subprocess.Popen([opener, str(out)])
 
@@ -576,7 +576,7 @@ class App:
         srcs = ch.get("sources_resolved") or [ch.get("source_resolved") or ch.get("source_file") or "无"]
         n_sup = 0
         if md.exists():
-            for ln in md.read_text(encoding="utf-8").splitlines():
+            for ln in read_text_tolerant(md).splitlines():
                 t = ln.strip()
                 if t.startswith(("#", ">")):
                     continue
@@ -646,7 +646,7 @@ class App:
             self.var_status.set(hint)
 
     def _update_search_status(self):
-        prov = self.var_provider.get().strip() or "bing_cn"
+        prov = self.var_provider.get().strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV:
             has = bool(os.environ.get(SEARCH_ENV[prov]))
             self.var_searchstat.set(f"检索源 {prov}（需Key·{'已设置' if has else '未设置'}）")
@@ -822,7 +822,7 @@ class App:
     def _set_search_key(self):
         prov = self.var_provider.get()
         if prov not in SEARCH_ENV:
-            tip = {"bing_cn": "bing_cn（cn.bing.com）国内可直连、无需 Key。",
+            tip = {"bing_cn": "bing_cn＝authoritative 的旧名（权威来源聚合：维基/官方/期刊/PubMed），免 Key、国内可直连。",
                    "pubmed": "pubmed（NCBI）学术、国内可直连、无需 Key。",
                    "ddg": "ddg 免费、无需 Key；需安装一次：pip install ddgs"}.get(prov, "该来源无需 Key。")
             messagebox.showinfo("无需 Key", tip)
@@ -931,7 +931,7 @@ class App:
         if not self.chapters:
             messagebox.showwarning("请先审计", "还没有章节列表，请先点“① 审计资料”。")
             return
-        prov = self.var_provider.get().strip() or "bing_cn"
+        prov = self.var_provider.get().strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV:
             try:
                 has_key = bool(self._cfg(self.var_source.get().strip(), "", "", provider=prov).search_key())
@@ -987,7 +987,7 @@ class App:
             f = out_dir / f"{stem}.md"
             if not f.exists():
                 continue
-            lines = f.read_text(encoding="utf-8").splitlines()
+            lines = read_text_tolerant(f).splitlines()
             hits, in_sec, sec_found = [], False, False
             # 优先只取“## 待核”小节（模型自己汇总的补充清单）
             for ln in lines:

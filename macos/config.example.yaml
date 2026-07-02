@@ -31,7 +31,7 @@ ignore:
   - "*提示词*"        # 非课程素材示例；按需增删
 
 # ---- 联网核对（web 检索 → 真实来源补充）----
-# 中国大陆可直连、免 Key：bing_cn（默认，抓 cn.bing.com）/ pubmed（学术医学）/ ddg(需装ddgs,国内不稳)
+# 中国大陆可直连、免 Key：bing_cn（默认，authoritative 权威来源聚合的兼容旧名）/ authoritative / wikipedia / pubmed / so360 / sogou / ddg(需装ddgs,国内不稳)
 # 需 Key（可能需自备网络）：tavily / serper / bing(Azure)；Key 放 .env: TAVILY_API_KEY / SERPER_API_KEY / BING_API_KEY
 search_provider: "bing_cn"
 search_fallback: "pubmed"     # 主源无结果时自动回退（国内直连免Key）；留空可关闭

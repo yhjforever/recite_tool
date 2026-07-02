@@ -16,7 +16,8 @@ from .audit import run_audit
 from .build import run_build
 from .generate import run_generate
 from .verify import run_verify
-from .util import read_json, chapter_stem
+from .util import read_json, chapter_stem, read_text_tolerant
+from .providers import PROVIDERS, DEFAULT_PROVIDER
 # 复用 ttk 版里已写好的本地存储/环境变量助手，避免重复
 from .gui import (read_env_key, write_env_kv, write_env_key, load_state, save_state,
                   _QueueWriter, SEARCH_ENV, ENV_PATH)
@@ -93,7 +94,7 @@ class App:
 
         self.var_source = tk.StringVar()
         self.var_subject = tk.StringVar()
-        self.var_provider = tk.StringVar(value="bing_cn")
+        self.var_provider = tk.StringVar(value=DEFAULT_PROVIDER)
         self.var_overwrite = tk.BooleanVar(value=False)
         self._buttons = []
         self._need_audit = []
@@ -279,7 +280,7 @@ class App:
                                           corner_radius=9, font=self.f, fg_color=SURFACE_SOFT,
                                           text_color=TEXT, button_color=ACCENT,
                                           button_hover_color=ACCENT_H, dropdown_fg_color=CARD,
-                                          values=["authoritative", "wikipedia", "pubmed", "so360", "sogou", "ddg", "tavily", "serper", "bing"])
+                                          values=PROVIDERS)
         self.cmb_prov.pack(side="left")
         self._ghost(r2, "设置检索 Key", self._set_search_key, 116).pack(side="left", padx=8)
 
@@ -508,7 +509,7 @@ class App:
         srcs = ch.get("sources_resolved") or [ch.get("source_resolved") or ch.get("source_file") or "无"]
         n_sup = 0
         if md.exists():
-            for ln in md.read_text(encoding="utf-8").splitlines():
+            for ln in read_text_tolerant(md).splitlines():
                 t = ln.strip()
                 if not t.startswith(("#", ">")) and ("〔网核〕" in t or "〔补〕" in t):
                     n_sup += 1
@@ -557,7 +558,7 @@ class App:
             messagebox.showwarning("提示", "暂未设置 API Key。审计/生成前请点“设置 / 修改密钥”。")
 
     def _update_search_status(self):
-        prov = self.var_provider.get().strip() or "bing_cn"
+        prov = self.var_provider.get().strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV:
             has = bool(os.environ.get(SEARCH_ENV[prov]))
             self.lbl_search.configure(text=f"检索源 {prov}（需Key·{'已设置' if has else '未设置'}）")
@@ -629,7 +630,7 @@ class App:
             pass
         self.var_source.set(st.get("source_dir") or cfg_src)
         self.var_subject.set(st.get("subject", ""))
-        self.var_provider.set(st.get("search_provider", "bing_cn") or "bing_cn")
+        self.var_provider.set(st.get("search_provider") or DEFAULT_PROVIDER)
         self.txt_note.delete("1.0", "end")
         self.txt_note.insert("1.0", st.get("subject_note", ""))
 
@@ -637,7 +638,7 @@ class App:
         save_state({"source_dir": self.var_source.get().strip(),
                     "subject": self.var_subject.get().strip(),
                     "subject_note": self.txt_note.get("1.0", "end").strip(),
-                    "search_provider": self.var_provider.get().strip() or "bing_cn"})
+                    "search_provider": self.var_provider.get().strip() or DEFAULT_PROVIDER})
         self.lbl_status.configure(text="设置已保存")
         self._log("设置已保存。\n")
 
@@ -672,7 +673,8 @@ class App:
     def _set_search_key(self):
         prov = self.var_provider.get()
         if prov not in SEARCH_ENV:
-            tip = {"bing_cn": "bing_cn 国内可直连、无需 Key。", "pubmed": "pubmed 学术、国内可直连、无需 Key。",
+            tip = {"bing_cn": "bing_cn＝authoritative 的旧名（权威来源聚合），免 Key、国内可直连。",
+                   "pubmed": "pubmed 学术、国内可直连、无需 Key。",
                    "ddg": "ddg 免费、无需 Key；需 pip install ddgs"}.get(prov, "该来源无需 Key。")
             messagebox.showinfo("无需 Key", tip)
             return
@@ -886,7 +888,7 @@ class App:
     def _do_verify(self):
         if not self._precheck():
             return
-        prov = self.var_provider.get().strip() or "bing_cn"
+        prov = self.var_provider.get().strip() or DEFAULT_PROVIDER
         if prov in SEARCH_ENV and not os.environ.get(SEARCH_ENV[prov]):
             try:
                 ok = bool(self._cfg(self.var_source.get().strip(), "", "", provider=prov).search_key())
@@ -939,7 +941,7 @@ class App:
             if not f.exists():
                 continue
             hits, in_sec, sec_found = [], False, False
-            for ln in f.read_text(encoding="utf-8").splitlines():
+            for ln in read_text_tolerant(f).splitlines():
                 s = ln.strip()
                 if s.startswith("## "):
                     in_sec = "待核" in s

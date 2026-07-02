@@ -79,9 +79,13 @@ recite_tool_mac/
 │  ├─ audit.py             审计编排 → audit.json
 │  ├─ build.py             写提示词包
 │  ├─ generate.py          逐章生成 .md（含续写、断点续跑）
-│  ├─ websearch.py         联网检索后端（bing_cn/pubmed/ddg/tavily/serper/bing + 抓正文）
+│  ├─ providers.py         联网核对来源唯一清单（界面/config/websearch 共用）
+│  ├─ websearch.py         联网检索后端（权威聚合/PubMed/百科/国内搜索/API + 抓正文）
 │  ├─ verify.py            联网核对：待核点 → 检索 → 真实来源补充
-│  ├─ gui.py               图形界面（Tkinter；字体/图标/打开文件夹做了 macOS 适配）
+│  ├─ gui_web.py           Web 图形界面（pywebview + web/index.html，首选）
+│  ├─ gui_ctk.py           图形界面回退版（CustomTkinter）
+│  ├─ gui.py               图形界面回退版（Tkinter；字体/图标/打开文件夹做了 macOS 适配）
+│  ├─ web/index.html       Web 版前端
 │  └─ cli.py / __main__.py 命令行
 ├─ tests/test_fixes.py     最小回归测试（截断/编码/缓存/index/搜索/切片）
 │                          运行：python3 tests/test_fixes.py
@@ -201,15 +205,20 @@ python3 -m recite run --source "/Users/你/Documents/病理生理学" --subject 
 **选择检索来源（界面“联网核对来源”下拉 / config 的 `search_provider`）：**
 | provider | 中国大陆 | 要 Key | 说明 |
 |---|---|---|---|
-| `bing_cn`（默认） | ✅ 可直连 | 否 | 抓 cn.bing.com，免 Key、免翻墙 |
+| `bing_cn`（默认） | ✅ 可直连 | 否 | 兼容旧名；等价于权威来源聚合（维基/官方/期刊/高校/PubMed），免 Key |
+| `authoritative` | ✅ 可直连 | 否 | 权威来源聚合的显式名称，宁缺毋滥 |
+| `wikipedia` | ✅ 可直连 | 否 | 中文维基百科 API，稳定、免反爬 |
 | `pubmed` | ✅ 可直连 | 否 | NCBI PubMed，**学术医学**文献，权威 |
+| `so360` | ✅ 可直连 | 否 | 360 搜索宽搜，不过滤权威，结果需谨慎 |
+| `sogou` | ✅ 可直连 | 否 | 搜狗宽搜，时通时断，结果需谨慎 |
 | `ddg` | ⚠️ 不稳 | 否 | DuckDuckGo，需 `pip install ddgs` |
 | `tavily` | 需自备网络 | 是 | 为 LLM 优化、含正文。`.env: TAVILY_API_KEY` |
 | `serper` | 需自备网络 | 是 | Google 结果，便宜。`SERPER_API_KEY` |
 | `bing` | 需自备网络 | 是 | Azure Bing API。`BING_API_KEY` |
 
-- 默认 `bing_cn` 国内**直连可用、无需任何 Key**；学术优先可选 `pubmed`。
-- 界面里点 **“设置检索Key”** 仅 tavily/serper/bing 需要（bing_cn/pubmed/ddg 会提示无需）。
+- 默认 `bing_cn` 国内**直连可用、无需任何 Key**；它是 `authoritative` 的兼容旧名，不再表示单纯抓 `cn.bing.com`。
+- 学术优先可选 `pubmed`；只想查百科可选 `wikipedia`；`so360`/`sogou` 是宽搜，适合找入口但需要你多核对。
+- 界面里点 **“设置检索Key”** 仅 tavily/serper/bing 需要（其余免 Key 来源会提示无需）。
 - `trusted_domains` 命中的来源会**排在前面并标“可信源”**（默认给了 who.int、nhc.gov.cn、chinacdc.cn 等，按学科改）。
 - `verify_max_items` 限制每章核对的点数以控时间/成本；重复点 **④ 联网核对** 会**覆盖**上次的“联网核对补充”小节（幂等）。
 
@@ -242,7 +251,7 @@ python3 -m recite run --source "/Users/你/Documents/病理生理学" --subject 
 
 - **关于 `〔补〕` 补充内容**：deepseek-chat **不会实时联网检索**，`〔补〕` 来自模型对教材/指南的记忆，**可能有误或张冠李戴**。它只用于"占位提示该点课件没讲"，务必核对，并以你自己补的为准。生成后弹出的"待核清单"就是这些点的汇总。
 - **`.partial.md`（截断残稿）**：若某章太长、模型用尽续写仍没写完，**不会**覆盖正式 `.md`，而是存成 `章名.partial.md` 并在日志/界面警告。处理办法：调大 `config.yaml` 的 `max_tokens` / `max_continuations`（或把该章 `book_slice_max_chars` 调小以缩短输入），再勾"覆盖重做"重新生成。界面表格里该章状态会显示"截断"。
-- **联网核对无结果**：默认 `bing_cn` 若解析为 0（结构变化/风控），会自动回退到 `search_fallback`（默认 `pubmed`）；也可在界面切换来源。
+- **联网核对无结果**：默认 `bing_cn` 若没有命中权威来源，会自动回退到 `search_fallback`（默认 `pubmed`）；也可在界面切换来源。
 - **文本编码**：`.txt/.md` 资料若是记事本 ANSI/GBK 保存，工具会自动按 GBK 解码；若仍是大量乱码会直接报错提示你"另存为 UTF-8"，不会拿乱码去花 API。
 
 - **先校对 audit.json**：版本取舍（2026>2025>通用版）、一个课件覆盖多章、某章缺课件等都在 `chapters`/`warnings` 里。改完再 `build`/`generate`。
